@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>KitsuneGIT</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- ─── Loading Overlay ─── -->
+  <div id="loading-overlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <span id="loading-text">Loading...</span>
+  </div>
+
+  <!-- ─── Welcome Screen ─── -->
+  <div id="welcome-screen" class="welcome-screen">
+    <div class="welcome-content">
+      <h1 class="welcome-title">🦊 KitsuneGIT</h1>
+      <p class="welcome-subtitle">Fast & Lightweight Git Client</p>
+      <div class="welcome-actions">
+        <button id="btn-open-repo" class="btn btn-primary btn-large">
+          <span class="icon">📂</span> Open Repository
+        </button>
+        <button id="btn-clone-repo" class="btn btn-secondary btn-large">
+          <span class="icon">⬇</span> Clone Repository
+        </button>
+        <button id="btn-init-repo" class="btn btn-secondary btn-large">
+          <span class="icon">✨</span> Init New Repository
+        </button>
+      </div>
+      <!-- Recent Repos -->
+      <div class="recent-repos" id="recent-repos">
+        <h3 class="recent-title">Recent Repositories</h3>
+        <div id="recent-repos-list" class="recent-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Main App ─── -->
+  <div id="app" class="app hidden">
+    <!-- Repo Tabs -->
+    <div class="tab-bar" id="tab-bar">
+      <button id="tab-add" class="tab-add-btn" title="Open another repository">+</button>
+    </div>
+
+    <!-- Top Toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <button id="tb-open" class="toolbar-btn" title="Open Repository (Ctrl+O)">📂</button>
+        <div class="toolbar-separator"></div>
+        <button id="tb-fetch" class="toolbar-btn" title="Fetch (Ctrl+Shift+F)">🔄 Fetch</button>
+        <button id="tb-pull" class="toolbar-btn" title="Pull (Ctrl+Shift+P)">⬇ Pull</button>
+        <button id="tb-push" class="toolbar-btn" title="Push (Ctrl+Shift+U)">⬆ Push</button>
+        <div class="toolbar-separator"></div>
+        <button id="tb-branch" class="toolbar-btn" title="Create Branch (Ctrl+Shift+B)">🌿 Branch</button>
+        <button id="tb-merge" class="toolbar-btn" title="Merge">🔀 Merge</button>
+        <button id="tb-stash" class="toolbar-btn" title="Stash (Ctrl+Shift+S)">📦 Stash</button>
+        <button id="tb-tag" class="toolbar-btn" title="Create Tag">🏷 Tag</button>
+        <div class="toolbar-separator"></div>
+        <button id="tb-gitflow" class="toolbar-btn" title="GitFlow">🌊 GitFlow</button>
+        <div class="toolbar-separator"></div>
+        <button id="tb-compare" class="toolbar-btn" title="Compare Branches">🔍 Compare</button>
+        <button id="tb-terminal" class="toolbar-btn" title="Open Terminal">💻 Terminal</button>
+        <div class="toolbar-separator"></div>
+        <button id="tb-settings" class="toolbar-btn" title="Settings">⚙ Settings</button>
+        <button id="tb-refresh" class="toolbar-btn" title="Refresh (F5)">🔃</button>
+      </div>
+      <div class="toolbar-right">
+        <button id="tb-theme" class="toolbar-btn" title="Toggle theme">🌙</button>
+        <button id="tb-shortcuts" class="toolbar-btn" title="Keyboard shortcuts (?)">⌨</button>
+        <span id="tb-branch-name" class="toolbar-branch" title="Current branch"></span>
+        <span id="tb-repo-path" class="toolbar-path" title="Repository path"></span>
+      </div>
+    </div>
+
+    <!-- Main Layout -->
+    <div class="main-layout">
+      <!-- Left Sidebar -->
+      <div class="sidebar" id="sidebar">
+        <div class="sidebar-resize-handle" id="sidebar-resize"></div>
+
+        <!-- Workspace Section -->
+        <div class="sidebar-section">
+          <div class="sidebar-header" data-toggle="workspace-content">
+            <span class="sidebar-arrow">▼</span> WORKSPACE
+          </div>
+          <div class="sidebar-content" id="workspace-content">
+            <div class="sidebar-item active" id="nav-status" data-view="status">
+              <span>📋</span> File Status
+              <span class="badge" id="badge-changes">0</span>
+            </div>
+            <div class="sidebar-item" id="nav-history" data-view="history">
+              <span>📜</span> History
+            </div>
+          </div>
+        </div>
+
+        <!-- Branches Section -->
+        <div class="sidebar-section">
+          <div class="sidebar-header" data-toggle="branches-content">
+            <span class="sidebar-arrow">▼</span> BRANCHES
+          </div>
+          <div class="sidebar-content" id="branches-content">
+            <input id="branch-filter" type="text" class="sidebar-search-input" placeholder="Filter branches...">
+            <div id="branches-list" class="tree-list"></div>
+          </div>
+        </div>
+
+        <!-- Tags Section -->
+        <div class="sidebar-section">
+          <div class="sidebar-header" data-toggle="tags-content">
+            <span class="sidebar-arrow">▼</span> TAGS
+          </div>
+          <div class="sidebar-content" id="tags-content">
+            <input id="tag-filter" type="text" class="sidebar-search-input" placeholder="Filter tags...">
+            <div id="tags-list" class="tree-list"></div>
+          </div>
+        </div>
+
+        <!-- Stashes Section -->
+        <div class="sidebar-section">
+          <div class="sidebar-header" data-toggle="stashes-content">
+            <span class="sidebar-arrow">▼</span> STASHES
+          </div>
+          <div class="sidebar-content" id="stashes-content">
+            <div id="stashes-list" class="tree-list"></div>
+          </div>
+        </div>
+
+        <!-- GitFlow Section -->
+        <div class="sidebar-section" id="gitflow-section">
+          <div class="sidebar-header" data-toggle="gitflow-content">
+            <span class="sidebar-arrow">▼</span> GITFLOW
+          </div>
+          <div class="sidebar-content" id="gitflow-content">
+            <div id="gitflow-status" class="gitflow-status"></div>
+            <div id="gitflow-list" class="tree-list"></div>
+          </div>
+        </div>
+
+        <!-- Submodules Section -->
+        <div class="sidebar-section">
+          <div class="sidebar-header" data-toggle="submodules-content">
+            <span class="sidebar-arrow">▼</span> SUBMODULES
+          </div>
+          <div class="sidebar-content" id="submodules-content">
+            <div id="submodules-list" class="tree-list"></div>
+          </div>
+        </div>
+
+        <!-- Remotes Section -->
+        <div class="sidebar-section">
+          <div class="sidebar-header" data-toggle="remotes-content">
+            <span class="sidebar-arrow">▼</span> REMOTES
+          </div>
+          <div class="sidebar-content" id="remotes-content">
+            <div id="remotes-list" class="tree-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Center Content -->
+      <div class="content">
+        <!-- Status View -->
+        <div id="view-status" class="view active">
+          <div class="status-layout">
+            <!-- Rebase Conflict Bar (hidden by default) -->
+            <div id="rebase-conflict-bar" class="rebase-conflict-bar" style="display:none">
+              <span>⚠ Rebase in progress — resolve conflicts then:</span>
+              <button id="btn-rebase-continue" class="btn btn-primary">Continue</button>
+              <button id="btn-rebase-abort" class="btn btn-danger">Abort</button>
+            </div>
+            <!-- Staging Area -->
+            <div class="staging-area">
+              <div class="staging-resize-handle" id="staging-resize"></div>
+              <!-- Staged Files -->
+              <div class="file-section" id="staged-section">
+                <div class="file-section-header">
+                  <span>Staged Changes</span>
+                  <div>
+                    <button id="btn-unstage-all" class="btn btn-small" title="Unstage All">− All</button>
+                  </div>
+                </div>
+                <div class="file-list" id="staged-files" data-drop-zone="staged"></div>
+              </div>
+
+              <!-- Unstaged Files -->
+              <div class="file-section" id="unstaged-section">
+                <div class="file-section-header">
+                  <span>Unstaged Changes</span>
+                  <div class="file-section-header-actions">
+                    <input type="text" id="file-search" class="file-search-input" placeholder="Filter files...">
+                    <button id="btn-discard-all" class="btn btn-small btn-danger" title="Discard All Changes">✕ All</button>
+                    <button id="btn-stage-all" class="btn btn-small" title="Stage All">+ All</button>
+                  </div>
+                </div>
+                <div class="file-list" id="unstaged-files" data-drop-zone="unstaged"></div>
+              </div>
+
+              <!-- Commit Area -->
+              <div class="commit-area">
+                <div class="commit-type-bar">
+                  <select id="commit-type" class="commit-type-select" title="Conventional commit type">
+                    <option value="">— Type —</option>
+                    <option value="feat">feat</option>
+                    <option value="fix">fix</option>
+                    <option value="docs">docs</option>
+                    <option value="style">style</option>
+                    <option value="refactor">refactor</option>
+                    <option value="perf">perf</option>
+                    <option value="test">test</option>
+                    <option value="build">build</option>
+                    <option value="ci">ci</option>
+                    <option value="chore">chore</option>
+                    <option value="revert">revert</option>
+                  </select>
+                  <input id="commit-scope" type="text" class="commit-scope-input" placeholder="scope">
+                  <button id="btn-commit-history" class="toolbar-btn" title="Recent commit messages" style="font-size:14px;padding:2px 6px;">📋</button>
+                </div>
+                <textarea id="commit-message" placeholder="Commit message..." rows="3"></textarea>
+                <div class="commit-actions">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="commit-amend"> Amend
+                  </label>
+                  <div class="commit-actions-right">
+                    <span id="commit-char-count" class="commit-char-count">0</span>
+                    <button id="btn-commit" class="btn btn-primary">Commit</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Diff Viewer -->
+            <div class="diff-viewer">
+              <div class="diff-header">
+                <span id="diff-header-text">Select a file to view changes</span>
+                <div class="diff-header-actions">
+                  <button id="btn-copy-diff" class="btn btn-small" title="Copy diff to clipboard">📋 Copy</button>
+                  <button id="btn-diff-inline" class="btn btn-small btn-active" title="Inline diff">Inline</button>
+                  <button id="btn-diff-side" class="btn btn-small" title="Side-by-side diff">Side</button>
+                </div>
+              </div>
+              <div class="diff-content" id="diff-content"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- History View -->
+        <div id="view-history" class="view">
+          <div class="history-layout">
+            <!-- Left: commit list -->
+            <div class="history-left">
+              <div class="history-search-bar">
+                <input type="text" id="history-search" class="history-search-input" placeholder="Search commits (message, author, SHA)...">
+                <button id="history-search-btn" class="btn btn-small">Search</button>
+                <button id="history-search-clear" class="btn btn-small">Clear</button>
+              </div>
+              <div class="commit-list-container">
+                <table class="commit-table">
+                  <thead>
+                    <tr>
+                      <th class="col-graph">Graph</th>
+                      <th class="col-desc">Description</th>
+                      <th class="col-date">Date</th>
+                      <th class="col-author">Author</th>
+                      <th class="col-hash">SHA</th>
+                    </tr>
+                  </thead>
+                  <tbody id="commit-list"></tbody>
+                </table>
+              </div>
+            </div>
+            <!-- Resize handle (vertical) -->
+            <div class="history-resize-handle" id="history-resize-handle"></div>
+            <!-- Right: commit detail + diff -->
+            <div class="history-right" id="history-right">
+              <div class="commit-detail" id="commit-detail">
+                <div class="commit-detail-placeholder">Select a commit to view details</div>
+              </div>
+              <div class="commit-diff-panel" id="commit-diff-panel">
+                <div class="commit-diff-header">
+                  <span id="commit-diff-title">Diff</span>
+                  <div class="diff-header-actions">
+                    <button class="btn btn-small btn-active" id="btn-commit-diff-inline">Inline</button>
+                    <button class="btn btn-small" id="btn-commit-diff-side">Side by Side</button>
+                  </div>
+                </div>
+                <div class="commit-diff-content" id="commit-diff-content"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="statusbar">
+      <span id="statusbar-text">Ready</span>
+      <span id="statusbar-branch"></span>
+      <span id="statusbar-sync" class="statusbar-sync"></span>
+      <span id="statusbar-version" class="statusbar-version"></span>
+      <span id="statusbar-watcher-dot" class="statusbar-watcher-dot" title="Changes detected..."></span>
+      <span id="statusbar-watcher" class="statusbar-watcher" title="Auto-refresh active">👁</span>
+    </div>
+  </div>
+
+  <!-- ─── Modal Overlay ─── -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal" id="modal">
+      <div class="modal-header">
+        <h3 id="modal-title">Modal</h3>
+        <button class="modal-close" id="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-footer" id="modal-footer"></div>
+    </div>
+  </div>
+
+  <!-- ─── Keyboard Shortcuts Panel ─── -->
+  <div id="shortcuts-overlay" class="modal-overlay hidden">
+    <div class="modal" style="min-width:500px">
+      <div class="modal-header">
+        <h3>Keyboard Shortcuts</h3>
+        <button class="modal-close" id="shortcuts-close">✕</button>
+      </div>
+      <div class="modal-body shortcuts-body">
+        <table class="shortcuts-table">
+          <tr><td class="shortcut-key">Ctrl+O</td><td>Open Repository</td></tr>
+          <tr><td class="shortcut-key">Ctrl+Shift+O</td><td>Clone Repository</td></tr>
+          <tr><td class="shortcut-key">Ctrl+Shift+N</td><td>Init New Repository</td></tr>
+          <tr><td class="shortcut-key">F5</td><td>Refresh</td></tr>
+          <tr><td class="shortcut-key">Ctrl+Shift+F</td><td>Fetch</td></tr>
+          <tr><td class="shortcut-key">Ctrl+Shift+P</td><td>Pull</td></tr>
+          <tr><td class="shortcut-key">Ctrl+Shift+U</td><td>Push</td></tr>
+          <tr><td class="shortcut-key">Ctrl+Shift+B</td><td>Create Branch</td></tr>
+          <tr><td class="shortcut-key">Ctrl+Shift+S</td><td>Stash</td></tr>
+          <tr><td class="shortcut-key">Ctrl+Shift+G</td><td>GitFlow menu</td></tr>
+          <tr><td class="shortcut-key">Ctrl+Enter</td><td>Commit</td></tr>
+          <tr><td class="shortcut-key">Ctrl+1</td><td>File Status View</td></tr>
+          <tr><td class="shortcut-key">Ctrl+2</td><td>History View</td></tr>
+          <tr><td class="shortcut-key">↑ / ↓</td><td>Navigate files</td></tr>
+          <tr><td class="shortcut-key">?</td><td>Show this panel</td></tr>
+          <tr><td class="shortcut-key">Escape</td><td>Close modal / menu</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Toast notifications ─── -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
