@@ -11,11 +11,13 @@ const {
   assertRevision,
   assertSingleLine,
   assertStashIndex,
+  canonicalizeFileSystemPath,
   literalPathspec,
   literalPathspecs,
   normalizeMaxCount,
   normalizeRelativePath,
   normalizeRepositoryPath,
+  pathsEqual,
   sanitizeGitEnvironment
 } = require('./validation');
 
@@ -921,12 +923,9 @@ class GitService {
       const value = separator < 0 ? true : field.slice(separator + 1);
       if (key === 'worktree') {
         if (current) records.push(current);
-        let worktreePath = path.resolve(value);
-        try {
-          // Git may expand Windows 8.3 names or macOS /var -> /private/var
-          // symlinks. Return the filesystem's canonical path when it exists.
-          worktreePath = fs.realpathSync(value);
-        } catch { /* a prunable worktree may no longer exist */ }
+        // Git may expand Windows 8.3 names or macOS /var -> /private/var
+        // aliases. Normalize both representations through the native API.
+        const worktreePath = canonicalizeFileSystemPath(value);
         current = { path: worktreePath, head: null, branch: null, bare: false, detached: false, locked: null, prunable: null };
       } else if (current) {
         if (key === 'HEAD') current.head = value;
@@ -960,13 +959,13 @@ class GitService {
   async removeWorktree(targetPath, force = false) {
     const target = normalizeRepositoryPath(targetPath);
     const worktrees = await this.getWorktrees();
-    const match = worktrees.find(item => path.resolve(item.path) === target);
-    if (!match || path.resolve(match.path) === path.resolve(this.repoPath)) {
+    const match = worktrees.find(item => pathsEqual(item.path, target));
+    if (!match || pathsEqual(match.path, this.repoPath)) {
       throw new Error('Only an attached secondary worktree can be removed');
     }
     const args = ['worktree', 'remove'];
     if (force === true) args.push('--force');
-    args.push(target);
+    args.push(match.path);
     await this._runGit(args, { timeoutMs: 5 * 60_000 });
     return await this.getWorktrees();
   }

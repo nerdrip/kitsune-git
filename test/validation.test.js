@@ -8,9 +8,11 @@ const {
   assertRemoteName,
   assertRevision,
   assertStashIndex,
+  canonicalizeFileSystemPath,
   literalPathspec,
   normalizeMaxCount,
   normalizeRelativePath,
+  pathsEqual,
   sanitizeGitEnvironment
 } = require('../src/git/validation');
 
@@ -28,6 +30,12 @@ describe('Git input validation', () => {
   it('normalizes safe repository-relative paths', () => {
     assert.equal(normalizeRelativePath(repository, 'src\\main.js'), 'src/main.js');
     assert.equal(literalPathspec(repository, '--unusual.txt'), ':(literal)--unusual.txt');
+  });
+
+  it('compares canonical filesystem paths', () => {
+    assert.equal(canonicalizeFileSystemPath(path.join(repository, '.')), fs.realpathSync.native(repository));
+    assert.equal(pathsEqual(repository, path.join(repository, '.')), true);
+    if (process.platform === 'win32') assert.equal(pathsEqual(repository, repository.toUpperCase()), true);
   });
 
   it('rejects absolute paths and traversal', () => {

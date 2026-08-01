@@ -80,6 +80,27 @@ function normalizeRepositoryPath(repoPath, { mustExist = true } = {}) {
   return resolved;
 }
 
+function canonicalizeFileSystemPath(filePath) {
+  assertString(filePath, 'Path');
+  const resolved = path.resolve(filePath);
+  try {
+    return typeof fs.realpathSync.native === 'function'
+      ? fs.realpathSync.native(resolved)
+      : fs.realpathSync(resolved);
+  } catch {
+    // Paths retained by `git worktree prune` may no longer exist.
+    return resolved;
+  }
+}
+
+function pathsEqual(first, second) {
+  const left = canonicalizeFileSystemPath(first);
+  const right = canonicalizeFileSystemPath(second);
+  return process.platform === 'win32'
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
+}
+
 function normalizeRelativePath(repoPath, filePath, label = 'File path') {
   assertString(filePath, label);
   if (CONTROL_CHARACTERS.test(filePath) || path.isAbsolute(filePath) || /^[A-Za-z]:/.test(filePath)) {
@@ -196,11 +217,13 @@ module.exports = {
   assertRevision,
   assertSingleLine,
   assertStashIndex,
+  canonicalizeFileSystemPath,
   literalPathspec,
   literalPathspecs,
   normalizeMaxCount,
   normalizePathList,
   normalizeRelativePath,
   normalizeRepositoryPath,
+  pathsEqual,
   sanitizeGitEnvironment
 };

@@ -16,6 +16,7 @@ on:
       - package-lock.json
       - .github/workflows/build-packages.yml
       - scripts/build-packages.js
+      - scripts/build-environment.js
       - scripts/generate-icons.js
       - scripts/prepare-git-runtime.js
       - src/git/runtime-manifest.json
@@ -302,16 +303,17 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.prepare.outputs.tag }}
           TARGET: ${{ needs.prepare.outputs.target }}
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" release-assets/* --clobber
-            gh release edit "$TAG" --draft=false
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber --repo "$GH_REPO"
+            gh release edit "$TAG" --draft=false --repo "$GH_REPO"
           else
-            args=("$TAG" --target "$TARGET" --title "KitsuneGIT $TAG" --generate-notes --notes-file release-overview.md)
+            args=("$TAG" --repo "$GH_REPO" --target "$TARGET" --title "KitsuneGIT $TAG" --generate-notes --notes-file release-overview.md)
             if [[ "$PRERELEASE" == "true" ]]; then args+=(--prerelease); fi
             gh release create "${args[@]}" release-assets/*
           fi

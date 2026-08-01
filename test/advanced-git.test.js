@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { after, before, describe, it } = require('node:test');
 const GitService = require('../src/git/git-service');
+const { canonicalizeFileSystemPath, pathsEqual } = require('../src/git/validation');
 
 describe('advanced Git tools', { concurrency: 1 }, () => {
   let root;
@@ -42,10 +43,10 @@ describe('advanced Git tools', { concurrency: 1 }, () => {
   it('adds, lists, and removes a secondary worktree', async () => {
     const worktreePath = path.join(root, 'worktree');
     await service.addWorktree({ path: worktreePath, newBranch: 'worktree-test', startPoint: hashes[1] });
-    const canonicalPath = fs.realpathSync(worktreePath);
-    assert.ok((await service.getWorktrees()).some(item => item.path === canonicalPath));
+    const canonicalPath = canonicalizeFileSystemPath(worktreePath);
+    assert.ok((await service.getWorktrees()).some(item => pathsEqual(item.path, canonicalPath)));
     await service.removeWorktree(worktreePath);
-    assert.ok(!(await service.getWorktrees()).some(item => item.path === canonicalPath));
+    assert.ok(!(await service.getWorktrees()).some(item => pathsEqual(item.path, canonicalPath)));
   });
 
   it('runs a bisect session and resets it', async () => {
