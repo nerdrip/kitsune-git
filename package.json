@@ -1,6 +1,6 @@
 {
   "name": "kitsune-git",
-  "version": "1.0.0-beta4",
+  "version": "1.0.0-beta5",
   "private": true,
   "description": "Lightweight, fast, universal Git GUI client — like SourceTree but faster",
   "main": "src/main/main.js",
