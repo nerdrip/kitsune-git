@@ -18,6 +18,8 @@ if ! command -v node &> /dev/null; then
     echo "        Arch: sudo pacman -S nodejs npm"
     exit 1
 fi
+node -e "const [a,b]=process.versions.node.split('.').map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)" \
+  || { echo '[ERROR] Node.js 22.12.0 or newer is required.' >&2; exit 1; }
 
 # Check if Git is installed
 if ! command -v git &> /dev/null; then

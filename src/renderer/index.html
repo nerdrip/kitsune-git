@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none';">
   <title>KitsuneGIT</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <!-- ─── Loading Overlay ─── -->
-  <div id="loading-overlay" class="loading-overlay hidden">
-    <div class="spinner"></div>
+  <div id="loading-overlay" class="loading-overlay hidden" role="status" aria-live="polite" aria-busy="true">
+    <div class="spinner" aria-hidden="true"></div>
     <span id="loading-text">Loading...</span>
   </div>
 
@@ -18,7 +18,7 @@
   <div id="welcome-screen" class="welcome-screen">
     <div class="welcome-content">
       <h1 class="welcome-title">🦊 KitsuneGIT</h1>
-      <p class="welcome-subtitle">Fast & Lightweight Git Client</p>
+      <p class="welcome-subtitle" id="welcome-subtitle">Fast & Lightweight Git Client</p>
       <div class="welcome-actions">
         <button id="btn-open-repo" class="btn btn-primary btn-large">
           <span class="icon">📂</span> Open Repository
@@ -29,6 +29,11 @@
         <button id="btn-init-repo" class="btn btn-secondary btn-large">
           <span class="icon">✨</span> Init New Repository
         </button>
+      </div>
+      <div id="welcome-runtime" class="welcome-runtime" role="status" aria-live="polite">
+        <span id="welcome-runtime-status">Checking Git runtime...</span>
+        <button id="btn-runtime-setup" class="btn btn-small">Configure Git</button>
+        <button id="btn-diagnostics" class="btn btn-small">System check</button>
       </div>
       <!-- Recent Repos -->
       <div class="recent-repos" id="recent-repos">
@@ -62,12 +67,16 @@
         <button id="tb-gitflow" class="toolbar-btn" title="GitFlow">🌊 GitFlow</button>
         <div class="toolbar-separator"></div>
         <button id="tb-compare" class="toolbar-btn" title="Compare Branches">🔍 Compare</button>
+        <button id="tb-tools" class="toolbar-btn" title="Advanced repository tools">🧰 Tools</button>
+        <button id="tb-automations" class="toolbar-btn toolbar-btn-accent" title="Visual Git automations">⚡ Automations</button>
         <button id="tb-terminal" class="toolbar-btn" title="Open Terminal">💻 Terminal</button>
         <div class="toolbar-separator"></div>
         <button id="tb-settings" class="toolbar-btn" title="Settings">⚙ Settings</button>
         <button id="tb-refresh" class="toolbar-btn" title="Refresh (F5)">🔃</button>
       </div>
       <div class="toolbar-right">
+        <button id="tb-command" class="toolbar-btn" title="Command palette (Ctrl+K)">⌘</button>
+        <button id="tb-language" class="toolbar-btn" title="Switch language">PL</button>
         <button id="tb-theme" class="toolbar-btn" title="Toggle theme">🌙</button>
         <button id="tb-shortcuts" class="toolbar-btn" title="Keyboard shortcuts (?)">⌨</button>
         <span id="tb-branch-name" class="toolbar-branch" title="Current branch"></span>
@@ -168,7 +177,8 @@
           <div class="status-layout">
             <!-- Rebase Conflict Bar (hidden by default) -->
             <div id="rebase-conflict-bar" class="rebase-conflict-bar" style="display:none">
-              <span>⚠ Rebase in progress — resolve conflicts then:</span>
+              <span id="operation-state-label">⚠ Git operation in progress</span>
+              <button id="btn-resolve-conflicts" class="btn">Resolve conflicts</button>
               <button id="btn-rebase-continue" class="btn btn-primary">Continue</button>
               <button id="btn-rebase-abort" class="btn btn-danger">Abort</button>
             </div>
@@ -178,7 +188,7 @@
               <!-- Staged Files -->
               <div class="file-section" id="staged-section">
                 <div class="file-section-header">
-                  <span>Staged Changes</span>
+                  <span id="label-staged-changes">Staged Changes</span>
                   <div>
                     <button id="btn-unstage-all" class="btn btn-small" title="Unstage All">− All</button>
                   </div>
@@ -189,7 +199,7 @@
               <!-- Unstaged Files -->
               <div class="file-section" id="unstaged-section">
                 <div class="file-section-header">
-                  <span>Unstaged Changes</span>
+                  <span id="label-unstaged-changes">Unstaged Changes</span>
                   <div class="file-section-header-actions">
                     <input type="text" id="file-search" class="file-search-input" placeholder="Filter files...">
                     <button id="btn-discard-all" class="btn btn-small btn-danger" title="Discard All Changes">✕ All</button>
@@ -238,6 +248,8 @@
                 <span id="diff-header-text">Select a file to view changes</span>
                 <div class="diff-header-actions">
                   <button id="btn-copy-diff" class="btn btn-small" title="Copy diff to clipboard">📋 Copy</button>
+                  <button id="btn-apply-selected-lines" class="btn btn-small" style="display:none">Stage selected lines</button>
+                  <button id="btn-discard-selected-lines" class="btn btn-small btn-danger" style="display:none">Discard selected lines</button>
                   <button id="btn-diff-inline" class="btn btn-small btn-active" title="Inline diff">Inline</button>
                   <button id="btn-diff-side" class="btn btn-small" title="Side-by-side diff">Side</button>
                 </div>
@@ -300,6 +312,8 @@
       <span id="statusbar-text">Ready</span>
       <span id="statusbar-branch"></span>
       <span id="statusbar-sync" class="statusbar-sync"></span>
+      <span id="statusbar-operation" class="statusbar-operation hidden"></span>
+      <span id="statusbar-runtime" class="statusbar-runtime" title="Selected Git runtime"></span>
       <span id="statusbar-version" class="statusbar-version"></span>
       <span id="statusbar-watcher-dot" class="statusbar-watcher-dot" title="Changes detected..."></span>
       <span id="statusbar-watcher" class="statusbar-watcher" title="Auto-refresh active">👁</span>
@@ -308,10 +322,10 @@
 
   <!-- ─── Modal Overlay ─── -->
   <div id="modal-overlay" class="modal-overlay hidden">
-    <div class="modal" id="modal">
+    <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div class="modal-header">
         <h3 id="modal-title">Modal</h3>
-        <button class="modal-close" id="modal-close">✕</button>
+        <button class="modal-close" id="modal-close" aria-label="Close dialog">✕</button>
       </div>
       <div class="modal-body" id="modal-body"></div>
       <div class="modal-footer" id="modal-footer"></div>
@@ -320,10 +334,10 @@
 
   <!-- ─── Keyboard Shortcuts Panel ─── -->
   <div id="shortcuts-overlay" class="modal-overlay hidden">
-    <div class="modal" style="min-width:500px">
+    <div class="modal" style="min-width:500px" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
       <div class="modal-header">
-        <h3>Keyboard Shortcuts</h3>
-        <button class="modal-close" id="shortcuts-close">✕</button>
+        <h3 id="shortcuts-title">Keyboard Shortcuts</h3>
+        <button class="modal-close" id="shortcuts-close" aria-label="Close keyboard shortcuts">✕</button>
       </div>
       <div class="modal-body shortcuts-body">
         <table class="shortcuts-table">
@@ -340,6 +354,7 @@
           <tr><td class="shortcut-key">Ctrl+Enter</td><td>Commit</td></tr>
           <tr><td class="shortcut-key">Ctrl+1</td><td>File Status View</td></tr>
           <tr><td class="shortcut-key">Ctrl+2</td><td>History View</td></tr>
+          <tr><td class="shortcut-key">Ctrl+K</td><td>Command palette</td></tr>
           <tr><td class="shortcut-key">↑ / ↓</td><td>Navigate files</td></tr>
           <tr><td class="shortcut-key">?</td><td>Show this panel</td></tr>
           <tr><td class="shortcut-key">Escape</td><td>Close modal / menu</td></tr>
@@ -349,7 +364,7 @@
   </div>
 
   <!-- ─── Toast notifications ─── -->
-  <div id="toast-container" class="toast-container"></div>
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="false"></div>
 
   <script src="app.js"></script>
 </body>

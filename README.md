@@ -1,198 +1,146 @@
 # KitsuneGIT 🦊
 
-A lightweight, fast, universal **Git GUI client** — built with Electron.  
-Inspired by SourceTree, designed to be faster and cross-platform.
+KitsuneGIT is a cross-platform Git desktop client built with Electron and `simple-git`. Release packages are self-contained: they include a verified Git runtime, Git Credential Manager, Git LFS, and OpenSSH tooling, while still allowing a system or custom Git executable to be selected globally or per repository.
 
-## Features
+Highlights include visual Git automations, conditional app hooks, partial line/hunk staging, a three-pane conflict editor, interactive rebase with recovery refs, worktrees, reflog recovery, bisect, mailbox patches, sparse checkout, maintenance, GitFlow, repository profiles, encrypted GitHub/GitLab/Bitbucket tokens, pull-request management, SSH key/agent/known-host management, diagnostics, command palette, and English/Polish UI foundations.
 
-### Complete Git Operations
-- **Repository**: Open, Clone, Init
-- **Staging**: Stage/Unstage files individually or all at once, discard changes
-- **Commit**: Commit with message, amend support, conventional commits
-- **Push / Pull / Fetch**: Full remote sync with rebase option
-- **Branches**: Create, delete, checkout, rename (local & remote)
-- **Merge & Rebase**: Merge with --no-ff, rebase, abort/continue rebase
-- **Tags**: Create (lightweight & annotated), delete
-- **Stash**: Stash, list, pop, drop
-- **Remotes**: Add, remove, view
-- **Cherry-pick**: Apply specific commits
-- **Revert**: Revert commits
-- **Reset**: Soft, mixed, hard reset to any commit
-- **Blame**: Line-by-line annotation
-- **File History**: View commit history for any file
-- **Diff Viewer**: Inline and side-by-side diff with syntax highlighting
+## Automation Studio
 
-### Visual Interface
-- Dark/Light Catppuccin-inspired theme (toggle with one click)
-- SourceTree-like layout with sidebar (branches, tags, stashes, remotes)
-- Dual file status panel (staged/unstaged) with inline diff viewer
-- Commit history table with graph, refs, and commit detail pane
-- Multi-tab repository support
-- Context menus on files, branches, tags, stashes, commits
-- Drag & drop staging
-- Modal dialogs for complex operations
-- Toast notifications
-- Resizable sidebar
-- Keyboard shortcuts
-- File watcher with auto-refresh
-- Recent repositories list
-- Auto-updater for production builds
+Automation Studio turns repeatable Git sequences into one-click, validated workflows. It includes a ready-to-use `Develop → Main` macro that stages changes, asks for a commit message, commits and pushes `develop`, updates `main`, merges and pushes it, then returns to `develop`.
 
-### Cross-Platform
-- **Windows**: NSIS installer + portable executable
-- **Linux**: AppImage + .deb + .rpm + .tar.gz
-- Cross-platform file watching (chokidar)
+Workflows are assembled from visual blocks for staging, commit, fetch, pull, push, checkout, merge, requirements, and nested `if / else` decisions. Blocks support `${startBranch}`, `${currentBranch}`, and `${commitMessage}` variables, can be global or repository-specific, and always stop on the first Git error or merge conflict. They never execute arbitrary shell text.
 
-## Prerequisites
+An automation can run manually or as an app-level `after commit` hook with optional commit-message or branch conditions. Hook failures are reported separately after the commit succeeds, so a successful commit is never shown as failed. These hooks run for commits created in KitsuneGIT; they do not modify a repository's native `.git/hooks` directory.
 
-- [Node.js](https://nodejs.org/) 18+ 
-- [Git](https://git-scm.com/) installed and in PATH
+## Requirements
 
-## Quick Start
+- Node.js 22.12.0 or newer for development/building (Node.js 22 LTS is recommended)
+- A native build host for release packages: Windows for NSIS/portable EXE, macOS for DMG/ZIP, and Linux for DEB/RPM/AppImage/tar.gz
+
+End users do not need to install Git separately. In automatic mode KitsuneGIT prefers a supported system Git and falls back to the bundled runtime. Settings allow `Automatic`, `System`, `Managed`, or `Custom` selection, with an optional per-repository override.
+
+## Development
+
+```bash
+npm ci
+npm run dev
+```
+
+Convenience launchers are also included:
+
+- Windows: `start-dev.bat` and `start.bat`
+- Linux/macOS: `./start-dev.sh` and `./start.sh`
+
+Run the complete local verification before committing:
+
+```bash
+npm run verify
+```
+
+This performs syntax/configuration/IPC consistency checks and the Node integration test suite.
+
+## Release packages
+
+Package builds run verification first, regenerate platform icons, download/build the pinned native Git runtime, verify every download with SHA-256, and write artifacts plus `SHA256SUMS.txt` to `dist/`.
+
+| Platform | Installer | Portable | Architectures |
+| --- | --- | --- | --- |
+| Windows | NSIS setup EXE | Portable EXE | x64, arm64 |
+| macOS | DMG | ZIP containing `.app` | x64, arm64 |
+| Linux | DEB, RPM | AppImage, tar.gz | x64, arm64 |
 
 ### Windows
 
-```bash
-# Option 1: Use the batch scripts
-start-dev.bat          # Development mode (with DevTools)
-start.bat              # Production mode
-
-# Option 2: Manual
-npm install
-npm run dev            # Development
-npm start              # Production
+```bat
+build-installer.bat x64
+build-portable.bat x64
+build-windows.bat all all
 ```
+
+The first argument to `build-windows.bat` is `installer`, `portable`, or `all`; the second is `x64`, `arm64`, or `all`. `build-release.bat` remains as a compatibility alias for all Windows formats and architectures.
 
 ### Linux
 
 ```bash
-# Option 1: Use the shell scripts
-chmod +x start-dev.sh build-release.sh
-./start-dev.sh         # Development mode
-./start.sh             # Production mode
-
-# Option 2: Manual
-npm install
-npm run dev            # Development
-npm start              # Production
+chmod +x build-*.sh
+./build-installer.sh x64
+./build-portable.sh x64
+./build-linux.sh all all
 ```
 
-## Building Release Packages
-
-### Windows (from Windows)
+### macOS
 
 ```bash
-# Using the build script:
-build-release.bat
+chmod +x build-*.sh
+./build-installer.sh arm64
+./build-portable.sh arm64
+./build-macos.sh all all
+```
 
-# Or manually:
-npm install
+### npm and advanced usage
+
+```bash
 npm run build:win
-```
-
-**Output** (`dist/` folder):
-- `KitsuneGIT-1.0.0-beta1-win-x64.exe` — NSIS installer (with desktop shortcut, start menu, uninstaller)
-- `KitsuneGIT-1.0.0-beta1-win-x64-portable.exe` — Portable executable (no install needed)
-
-### Linux (from Linux)
-
-```bash
-# Using the build script:
-chmod +x build-release.sh
-./build-release.sh
-
-# Or manually:
-npm install
 npm run build:linux
+npm run build:mac
+npm run build:all       # every format and architecture for the native host
+
+node scripts/build-packages.js --help
 ```
 
-**Output** (`dist/` folder):
-- `KitsuneGIT-1.0.0-beta1-linux-x64.AppImage` — Universal Linux package (run anywhere)
-- `KitsuneGIT-1.0.0-beta1-linux-x64.deb` — Debian/Ubuntu package
-- `KitsuneGIT-1.0.0-beta1-linux-x64.rpm` — Fedora/RHEL package
-- `KitsuneGIT-1.0.0-beta1-linux-x64.tar.gz` — Generic archive
+Reliable packages for all operating systems cannot be produced on one host because macOS packaging/signing requires macOS and platform toolchains differ. The native six-job matrix in `.github/workflows/build-packages.yml` builds x64 and arm64 artifacts for Windows, macOS, and Linux.
 
-### Both Platforms at Once
+The runtime build inputs are pinned in `src/git/runtime-manifest.json`. Windows packages use the official MinGit ZIP; macOS/Linux jobs build the official Git source release natively. GCM and Git LFS native archives are included when the platform Git distribution does not already provide them. See [docs/RUNTIME.md](docs/RUNTIME.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-```bash
-npm run build:all
+### Signing, notarization, and publishing
+
+Unsigned local packages are suitable for testing. Public distribution should provide platform credentials through the standard electron-builder environment variables:
+
+- Windows/macOS signing: `CSC_LINK` and `CSC_KEY_PASSWORD`, or separate `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` and `MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD` secrets
+- Apple notarization: `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`
+- GitHub publishing: `GH_TOKEN`
+
+`npm run release` publishes x64 packages for the current native host and requires release credentials. It intentionally uses one architecture so update metadata cannot be overwritten by a second architecture; arm64 packages can still be built and uploaded separately. Normal build commands use `--publish never`. The updater targets `nerdrip/kitsune-git` GitHub releases and starts only in packaged builds containing update metadata.
+
+### Automatic GitHub releases
+
+GitHub Actions verifies pull requests and pushes on Windows, macOS, and Linux. A release build starts when a `v*` tag is pushed or when a version change in `package.json` is merged to `main`. The release workflow builds native x64 and ARM64 packages on six matching runners, combines the artifacts, generates `SHA256SUMS.txt`, and creates the corresponding GitHub Release automatically.
+
+If a release for the package version already exists, an ordinary merge does not replace it. Use the **Build and publish release** workflow's manual `rebuild_existing` option when the assets intentionally need to be rebuilt. Signing and Apple notarization are enabled automatically when the repository secrets listed above are configured; otherwise the workflow produces unsigned test/community packages.
+
+## Security model
+
+- Electron renderer sandbox and context isolation are enabled; Node integration is disabled.
+- Every IPC request is checked against the trusted local renderer.
+- Navigation and popups are denied. Chromium permissions are denied except for sanitized clipboard writes from the trusted renderer.
+- The renderer uses a deny-by-default Content Security Policy.
+- Shell/file actions are limited to the active repository; terminal launching does not interpolate untrusted paths into a host shell.
+- Git paths use literal pathspecs and repository-relative validation; refs, remotes, hashes, stash indexes, config values, and GitFlow names are validated.
+- HTTPS provider tokens are encrypted with Electron `safeStorage`; persistence is refused when the OS only exposes an unencrypted backend. Tokens are never returned to the renderer after saving.
+- Git mutations are serialized in an operation queue. Direct child-process operations receive an abort signal and repository switching is blocked while a mutation is active.
+- Production dependencies currently pass `npm audit --omit=dev` with zero known vulnerabilities.
+
+See [docs/AUDIT.md](docs/AUDIT.md) for the detailed audit, applied fixes, verification, and remaining release considerations.
+
+## Project structure
+
+```text
+src/automation/            Persisted visual macro validation, conditions, and safe execution
+src/main/                  Electron lifecycle, secure IPC, operation queue, diagnostics, profiles
+src/main/preload.js        Minimal context-bridge API
+src/git/                   Git service, runtime manager, patches, and validation
+src/auth/                  GCM, SSH keys, agent, and known-host manager
+src/integrations/          Encrypted Git hosting integrations
+src/renderer/              HTML, CSS, and renderer application
+scripts/check-project.js   Dependency-free static/project checks
+scripts/build-packages.js  Cross-platform package orchestration
+scripts/prepare-git-runtime.js  Verified native Git/GCM/LFS preparation
+scripts/generate-icons.js  PNG/Linux icon generation
+test/                      Validation and real-Git integration tests
+build/                     Application icons and build resources
+.github/workflows/         Native package matrix
 ```
-
-This will build for Windows + Linux.
-
-## App Icons
-
-Icons are auto-generated on first build via `npm run generate-icons`.  
-To use a custom icon, replace `build/icon.png` with your own 512x512 PNG.  
-`electron-builder` auto-generates `.ico` and `.icns` from it.
-
-## Project Structure
-
-```
-KitsuneGIT/
-├── build/
-│   └── icon.png               # App icon (auto-generated or custom)
-├── scripts/
-│   └── generate-icons.js      # Icon generation script
-├── src/
-│   ├── main/
-│   │   ├── main.js            # Electron main process
-│   │   └── preload.js         # Context bridge (IPC)
-│   ├── git/
-│   │   └── git-service.js     # Git operations (simple-git wrapper)
-│   └── renderer/
-│       ├── index.html         # UI shell
-│       ├── styles.css         # Dark/Light theme styles
-│       └── app.js             # Frontend logic
-├── start.bat / start.sh       # Production launchers
-├── start-dev.bat / start-dev.sh  # Development launchers
-├── build-release.bat / build-release.sh  # Build scripts
-├── package.json
-├── LICENSE
-└── README.md
-```
-
-## Available Scripts
-
-| Script | Description |
-|--------|-------------|
-| `npm start` | Run the app in production mode |
-| `npm run dev` | Run with DevTools open |
-| `npm run build:win` | Build Windows installer + portable |
-| `npm run build:linux` | Build Linux AppImage + deb + rpm + tar.gz |
-| `npm run build:all` | Build for all platforms |
-| `npm run release` | Build + publish release |
-| `npm run generate-icons` | Generate app icons from source |
-| `npm run pack` | Package without creating installer (for testing) |
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+O` | Open Repository |
-| `Ctrl+Shift+O` | Clone Repository |
-| `Ctrl+Shift+N` | Init New Repository |
-| `F5` | Refresh |
-| `Ctrl+Shift+F` | Fetch |
-| `Ctrl+Shift+P` | Pull |
-| `Ctrl+Shift+U` | Push |
-| `Ctrl+Shift+B` | Create Branch |
-| `Ctrl+Shift+S` | Stash |
-| `Ctrl+Shift+G` | GitFlow menu |
-| `Ctrl+Enter` | Commit |
-| `Ctrl+1` | File Status View |
-| `Ctrl+2` | History View |
-| `↑` / `↓` | Navigate files |
-| `?` | Keyboard Shortcuts |
-
-## Tech Stack
-
-- **Electron** — Cross-platform desktop app
-- **simple-git** — Node.js Git interface
-- **chokidar** — Cross-platform file watching
-- **electron-builder** — Packaging & distribution
-- **electron-updater** — Auto-update support
 
 ## License
 
-MIT
+KitsuneGIT is MIT licensed. Bundled runtime components retain their respective upstream licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

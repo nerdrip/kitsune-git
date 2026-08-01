@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "gitVersion": "2.55.0",
+  "windowsRelease": "2.55.0.3",
+  "gcmVersion": "2.9.1",
+  "lfsVersion": "3.7.1",
+  "source": {
+    "url": "https://www.kernel.org/pub/software/scm/git/git-2.55.0.tar.xz",
+    "sha256": "457fdb04dc8728e007d4688695e6912e6f680727920f2a40bf11eacc17505357"
+  },
+  "downloads": {
+    "win32-x64": {
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.3/MinGit-2.55.0.3-64-bit.zip",
+      "sha256": "f48e2d2dc74a24454adc6d8fd0ac25bf9c2386f19cfb06202b9465aaad4f9f05"
+    },
+    "win32-arm64": {
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.3/MinGit-2.55.0.3-arm64.zip",
+      "sha256": "f7748965d5068e81ad93ca1923650db6742d6e22332b1ae7567a841c59f6bde5"
+    }
+  },
+  "addons": {
+    "win32-x64": {
+      "gcm": { "type": "zip", "url": "https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.9.1/gcm-win-x64-2.9.1.zip", "sha256": "7dea2afd3b9ea22109d25f95066025d70e57281d96062605304f89fcca41b535" },
+      "lfs": { "type": "zip", "url": "https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-windows-amd64-v3.7.1.zip", "sha256": "8683cdc3d6c029b49393dcebbaa6265bd6efd9abdcf837be855b4cd42e5e80b6" }
+    },
+    "win32-arm64": {
+      "gcm": { "type": "zip", "url": "https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.9.1/gcm-win-arm64-2.9.1.zip", "sha256": "1b573743a6162415d8398cbd9e2201aa8c43fd291bf45c242a5a12fa5ded3bd1" },
+      "lfs": { "type": "zip", "url": "https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-windows-arm64-v3.7.1.zip", "sha256": "9441383a3928a7f387223711929292a46ace95580ceed443d61e7b8a4d9615c3" }
+    },
+    "darwin-x64": {
+      "gcm": { "type": "tar.gz", "url": "https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.9.1/gcm-osx-x64-2.9.1.tar.gz", "sha256": "326fc3e1c708ae792b010b2f9f701f3dc4dbaebdf40cafd036254ab0f148c034" },
+      "lfs": { "type": "zip", "url": "https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-darwin-amd64-v3.7.1.zip", "sha256": "b5b1b641c0648c83661fa9eda991cd3eff945264dabc2cdf411a80dfe7ec0970" }
+    },
+    "darwin-arm64": {
+      "gcm": { "type": "tar.gz", "url": "https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.9.1/gcm-osx-arm64-2.9.1.tar.gz", "sha256": "2ac8f99258d04acb45cf592eb5b06ec0e0760c329bce40a4d18dabb5e0e37f68" },
+      "lfs": { "type": "zip", "url": "https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-darwin-arm64-v3.7.1.zip", "sha256": "76260fb34f4ee622ff0a66b857e5954aa49c7e343a92e57a1ec4a760618c94b2" }
+    },
+    "linux-x64": {
+      "gcm": { "type": "tar.gz", "url": "https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.9.1/gcm-linux-x64-2.9.1.tar.gz", "sha256": "31fc151c3b111ffe25616a4356bd9a50bdcdbd0922c5e11990fb220c6caf1ce1" },
+      "lfs": { "type": "tar.gz", "url": "https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-linux-amd64-v3.7.1.tar.gz", "sha256": "1c0b6ee5200ca708c5cebebb18fdeb0e1c98f1af5c1a9cba205a4c0ab5a5ec08" }
+    },
+    "linux-arm64": {
+      "gcm": { "type": "tar.gz", "url": "https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.9.1/gcm-linux-arm64-2.9.1.tar.gz", "sha256": "cf3806b7528b5a5af16bd4bd0683202fc432d9008dd91d20c4c6744b24a033b5" },
+      "lfs": { "type": "tar.gz", "url": "https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-linux-arm64-v3.7.1.tar.gz", "sha256": "73a9c90eeb4312133a63c3eaee0c38c019ea7bfa0953d174809d25b18588dd8d" }
+    }
+  }
+}

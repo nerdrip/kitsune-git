@@ -1,0 +1,278 @@
+name: Build and publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      rebuild_existing:
+        description: Rebuild and replace assets when this version already has a GitHub Release
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve release version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      should_release: ${{ steps.release.outputs.should_release }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      target: ${{ steps.release.outputs.target }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version and release state
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          REBUILD_EXISTING: ${{ inputs.rebuild_existing || false }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "package.json contains an invalid release version: $version" >&2
+            exit 1
+          fi
+
+          tag="v${version}"
+          if [[ "$REF_TYPE" == "tag" && "$REF_NAME" != "$tag" ]]; then
+            echo "Git tag $REF_NAME does not match package.json version $tag" >&2
+            exit 1
+          fi
+
+          should_release=true
+          if [[ "$EVENT_NAME" == "push" && "$REF_TYPE" == "branch" ]]; then
+            previous_version="$(git show "${BEFORE_SHA}:package.json" 2>/dev/null | node -e "let input=''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(JSON.parse(input).version || ''));" || true)"
+            if [[ "$previous_version" == "$version" ]]; then
+              echo "package.json changed, but the package version is still $version; skipping release."
+              should_release=false
+            fi
+          fi
+
+          if [[ "$should_release" == "true" && "$REF_TYPE" != "tag" && "$REBUILD_EXISTING" != "true" ]] && gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; skipping the automatic rebuild."
+            should_release=false
+          fi
+
+          prerelease=false
+          if [[ "$version" == *-* ]]; then prerelease=true; fi
+
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "should_release=$should_release"
+            echo "prerelease=$prerelease"
+            echo "target=${GITHUB_SHA}"
+          } >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Verify release source
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run project checks and tests
+        run: npm run verify
+
+  build:
+    name: ${{ matrix.platform }} (${{ matrix.arch }})
+    needs:
+      - prepare
+      - verify
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            arch: x64
+          - os: windows-11-arm
+            platform: win
+            arch: arm64
+          - os: macos-15-intel
+            platform: mac
+            arch: x64
+          - os: macos-15
+            platform: mac
+            arch: arm64
+          - os: ubuntu-24.04
+            platform: linux
+            arch: x64
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install native Git build dependencies
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential libcurl4-openssl-dev libssl-dev zlib1g-dev libexpat1-dev
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build installer and portable packages
+        env:
+          CSC_LINK: ${{ matrix.platform == 'win' && (secrets.WIN_CSC_LINK || secrets.CSC_LINK) || matrix.platform == 'mac' && (secrets.MAC_CSC_LINK || secrets.CSC_LINK) || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'win' && (secrets.WIN_CSC_KEY_PASSWORD || secrets.CSC_KEY_PASSWORD) || matrix.platform == 'mac' && (secrets.MAC_CSC_KEY_PASSWORD || secrets.CSC_KEY_PASSWORD) || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: node scripts/build-packages.js --platform ${{ matrix.platform }} --type all --arch ${{ matrix.arch }} --skip-verify
+
+      - name: Upload installers and portable packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.tar.gz
+            dist/*.blockmap
+          if-no-files-found: error
+          retention-days: 14
+
+      # electron-builder uses shared channel file names such as latest.yml.
+      # Publish one authoritative x64 set so ARM64 metadata cannot overwrite it.
+      - name: Upload automatic-update metadata
+        if: matrix.arch == 'x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-update-metadata-${{ matrix.platform }}
+          path: |
+            dist/*.yml
+            dist/*.yaml
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - prepare
+      - build
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download every native package
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify assets and generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(release-assets/*)
+          if (( ${#assets[@]} == 0 )); then
+            echo "No release assets were downloaded" >&2
+            exit 1
+          fi
+
+          for arch in x64 arm64; do
+            if ! find release-assets -maxdepth 1 -type f -name "*-${arch}*" -print -quit | grep -q .; then
+              echo "No $arch package was produced" >&2
+              exit 1
+            fi
+          done
+
+          (
+            cd release-assets
+            find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' \
+              | LC_ALL=C sort \
+              | while IFS= read -r file; do sha256sum "$file"; done
+          ) > release-assets/SHA256SUMS.txt
+
+      - name: Write release overview
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          {
+            echo "## KitsuneGIT ${VERSION}"
+            echo
+            echo "Native packages are available for Windows, macOS, and Linux on x64 and ARM64."
+            echo
+            echo "| System | Installer | Portable |"
+            echo "| --- | --- | --- |"
+            echo "| Windows | NSIS setup EXE | Portable EXE |"
+            echo "| macOS | DMG | ZIP application bundle |"
+            echo "| Linux | DEB / RPM | AppImage / tar.gz |"
+            echo
+            echo "Verify downloaded files with \`SHA256SUMS.txt\`. Unsigned local/community builds may show normal operating-system security warnings."
+          } > release-overview.md
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          TARGET: ${{ needs.prepare.outputs.target }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+            gh release edit "$TAG" --draft=false
+          else
+            args=("$TAG" --target "$TARGET" --title "KitsuneGIT $TAG" --generate-notes --notes-file release-overview.md)
+            if [[ "$PRERELEASE" == "true" ]]; then args+=(--prerelease); fi
+            gh release create "${args[@]}" release-assets/*
+          fi
