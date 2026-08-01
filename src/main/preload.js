@@ -1,9 +1,81 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('api', {
+const api = Object.freeze({
   // Dialogs
   openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
-  selectFile: () => ipcRenderer.invoke('dialog:selectFile'),
+  openGitExecutable: () => ipcRenderer.invoke('dialog:openGitExecutable'),
+
+  // Git runtime
+  runtimeStatus: (repoPath) => ipcRenderer.invoke('runtime:getStatus', repoPath),
+  runtimeSettings: (repoPath) => ipcRenderer.invoke('runtime:getSettings', repoPath),
+  setRuntimeSettings: (settings, repoPath) => ipcRenderer.invoke('runtime:setSettings', settings, repoPath),
+  clearRuntimeOverride: (repoPath) => ipcRenderer.invoke('runtime:clearRepositoryOverride', repoPath),
+  installManagedRuntime: () => ipcRenderer.invoke('runtime:installManaged'),
+  onRuntimeProgress: (callback) => {
+    if (typeof callback !== 'function') throw new TypeError('Callback must be a function');
+    const listener = (_, progress) => callback(progress);
+    ipcRenderer.on('runtime:progress', listener);
+    return () => ipcRenderer.removeListener('runtime:progress', listener);
+  },
+
+  // Authentication and SSH keys
+  openSshKey: () => ipcRenderer.invoke('dialog:openSshKey'),
+  authStatus: (repoPath) => ipcRenderer.invoke('auth:getStatus', repoPath),
+  configureGcm: (store, repoPath) => ipcRenderer.invoke('auth:configureGcm', store, repoPath),
+  eraseHttpsCredential: (host, repoPath) => ipcRenderer.invoke('auth:eraseHttpsCredential', host, repoPath),
+  importSshKey: (keyPath) => ipcRenderer.invoke('auth:importKey', keyPath),
+  removeImportedSshKey: (keyPath) => ipcRenderer.invoke('auth:removeImportedKey', keyPath),
+  setRepositorySshKey: (keyPath, repoPath) => ipcRenderer.invoke('auth:setRepositoryKey', keyPath, repoPath),
+  generateSshKey: (input, repoPath) => ipcRenderer.invoke('auth:generateKey', input, repoPath),
+  addSshKeyToAgent: (keyPath, repoPath) => ipcRenderer.invoke('auth:addKeyToAgent', keyPath, repoPath),
+  removeSshKeyFromAgent: (keyPath, repoPath) => ipcRenderer.invoke('auth:removeKeyFromAgent', keyPath, repoPath),
+  readSshPublicKey: (keyPath) => ipcRenderer.invoke('auth:readPublicKey', keyPath),
+  deleteSshKey: (keyPath) => ipcRenderer.invoke('auth:deleteKey', keyPath),
+  scanSshHost: (host, port, repoPath) => ipcRenderer.invoke('auth:scanHost', host, port, repoPath),
+  trustSshHost: (scanResult) => ipcRenderer.invoke('auth:trustHost', scanResult),
+  testSshConnection: (host, port, user, repoPath) => ipcRenderer.invoke('auth:testSsh', host, port, user, repoPath),
+
+  // Diagnostics
+  runDiagnostics: (repoPath) => ipcRenderer.invoke('diagnostics:run', repoPath),
+  fixDiagnostic: (id, repoPath) => ipcRenderer.invoke('diagnostics:fix', id, repoPath),
+  exportDiagnostics: (repoPath) => ipcRenderer.invoke('diagnostics:export', repoPath),
+
+  // Git hosting providers and encrypted access tokens
+  providerStatus: () => ipcRenderer.invoke('provider:status'),
+  saveProviderAccount: (account) => ipcRenderer.invoke('provider:saveAccount', account),
+  removeProviderAccount: (provider) => ipcRenderer.invoke('provider:removeAccount', provider),
+  detectProviderRepository: () => ipcRenderer.invoke('provider:detectRepository'),
+  pullRequests: (repository) => ipcRenderer.invoke('provider:pullRequests', repository),
+  createPullRequest: (repository, input) => ipcRenderer.invoke('provider:createPullRequest', repository, input),
+  openExternalUrl: (url) => ipcRenderer.invoke('shell:openExternalUrl', url),
+
+  // Serialized Git operation queue
+  operationQueueStatus: () => ipcRenderer.invoke('operations:getStatus'),
+  cancelQueuedOperation: (id) => ipcRenderer.invoke('operations:cancel', id),
+  onOperationQueueChange: (callback) => {
+    if (typeof callback !== 'function') throw new TypeError('Callback must be a function');
+    const listener = (_, status) => callback(status);
+    ipcRenderer.on('operations:changed', listener);
+    return () => ipcRenderer.removeListener('operations:changed', listener);
+  },
+
+  // Visual Git automations and app-level hooks
+  automations: () => ipcRenderer.invoke('automation:list'),
+  saveAutomation: (macro) => ipcRenderer.invoke('automation:save', macro),
+  removeAutomation: (id) => ipcRenderer.invoke('automation:remove', id),
+  runAutomation: (id, input) => ipcRenderer.invoke('automation:run', id, input),
+  onAutomationEvent: (callback) => {
+    if (typeof callback !== 'function') throw new TypeError('Callback must be a function');
+    const listener = (_, event) => callback(event);
+    ipcRenderer.on('automations:event', listener);
+    return () => ipcRenderer.removeListener('automations:event', listener);
+  },
+
+  // Reusable repository profiles
+  profiles: () => ipcRenderer.invoke('profiles:list'),
+  saveProfile: (profile) => ipcRenderer.invoke('profiles:save', profile),
+  removeProfile: (name) => ipcRenderer.invoke('profiles:remove', name),
+  applyProfile: (name) => ipcRenderer.invoke('profiles:apply', name),
 
   // Repository
   openRepo: (path) => ipcRenderer.invoke('git:openRepo', path),
@@ -17,6 +89,7 @@ contextBridge.exposeInMainWorld('api', {
   // Diff
   diff: (file) => ipcRenderer.invoke('git:diff', file),
   diffCached: (file) => ipcRenderer.invoke('git:diffCached', file),
+  applySelection: (file, selection, action) => ipcRenderer.invoke('git:applySelection', file, selection, action),
 
   // Staging
   stage: (files) => ipcRenderer.invoke('git:stage', files),
@@ -41,8 +114,38 @@ contextBridge.exposeInMainWorld('api', {
   // Merge / Rebase
   merge: (branch, noFf) => ipcRenderer.invoke('git:merge', branch, noFf),
   rebase: (branch) => ipcRenderer.invoke('git:rebase', branch),
-  rebaseAbort: () => ipcRenderer.invoke('git:rebaseAbort'),
-  rebaseContinue: () => ipcRenderer.invoke('git:rebaseContinue'),
+  interactiveRebasePreview: (upstream) => ipcRenderer.invoke('git:interactiveRebasePreview', upstream),
+  startInteractiveRebase: (upstream, plan) => ipcRenderer.invoke('git:startInteractiveRebase', upstream, plan),
+  operationState: () => ipcRenderer.invoke('git:operationState'),
+  conflictFile: (file) => ipcRenderer.invoke('git:conflictFile', file),
+  saveConflictResolution: (file, content) => ipcRenderer.invoke('git:saveConflictResolution', file, content),
+  resolveConflictUsing: (file, side) => ipcRenderer.invoke('git:resolveConflictUsing', file, side),
+  continueOperation: () => ipcRenderer.invoke('git:continueOperation'),
+  abortOperation: () => ipcRenderer.invoke('git:abortOperation'),
+
+  // Advanced repository tools
+  worktrees: () => ipcRenderer.invoke('git:worktrees'),
+  addWorktree: (options) => ipcRenderer.invoke('git:addWorktree', options),
+  removeWorktree: (path, force) => ipcRenderer.invoke('git:removeWorktree', path, force),
+  pruneWorktrees: () => ipcRenderer.invoke('git:pruneWorktrees'),
+  reflog: (maxCount) => ipcRenderer.invoke('git:reflog', maxCount),
+  recoverToBranch: (hash, branch) => ipcRenderer.invoke('git:recoverToBranch', hash, branch),
+  bisectStatus: () => ipcRenderer.invoke('git:bisectStatus'),
+  startBisect: (good, bad) => ipcRenderer.invoke('git:startBisect', good, bad),
+  markBisect: (result) => ipcRenderer.invoke('git:markBisect', result),
+  resetBisect: () => ipcRenderer.invoke('git:resetBisect'),
+  exportPatch: (hash) => ipcRenderer.invoke('git:exportPatch', hash),
+  importPatch: () => ipcRenderer.invoke('git:importPatch'),
+  lfsStatus: () => ipcRenderer.invoke('git:lfsStatus'),
+  initializeLfs: () => ipcRenderer.invoke('git:initializeLfs'),
+  trackLfs: (pattern, enabled) => ipcRenderer.invoke('git:trackLfs', pattern, enabled),
+  sparseStatus: () => ipcRenderer.invoke('git:sparseStatus'),
+  setSparsePaths: (paths) => ipcRenderer.invoke('git:setSparsePaths', paths),
+  disableSparse: () => ipcRenderer.invoke('git:disableSparse'),
+  maintenanceStatus: () => ipcRenderer.invoke('git:maintenanceStatus'),
+  repositoryOverview: () => ipcRenderer.invoke('git:repositoryOverview'),
+  runMaintenance: () => ipcRenderer.invoke('git:runMaintenance'),
+  setMaintenance: (enabled) => ipcRenderer.invoke('git:setMaintenance', enabled),
 
   // Tags
   tags: () => ipcRenderer.invoke('git:tags'),
@@ -103,7 +206,6 @@ contextBridge.exposeInMainWorld('api', {
   lastCommitMessage: () => ipcRenderer.invoke('git:lastCommitMessage'),
 
   // GitFlow
-  gitflowConfig: () => ipcRenderer.invoke('git:gitflowConfig'),
   gitflowInit: (options) => ipcRenderer.invoke('git:gitflowInit', options),
   gitflowFeatureStart: (name) => ipcRenderer.invoke('git:gitflowFeatureStart', name),
   gitflowFeatureFinish: (name) => ipcRenderer.invoke('git:gitflowFeatureFinish', name),
@@ -120,13 +222,14 @@ contextBridge.exposeInMainWorld('api', {
   startWatcher: (path) => ipcRenderer.invoke('git:startWatcher', path),
   stopWatcher: () => ipcRenderer.invoke('git:stopWatcher'),
   onWatcherChange: (callback) => {
-    ipcRenderer.on('watcher:changed', (_, filename) => callback(filename));
+    if (typeof callback !== 'function') throw new TypeError('Callback must be a function');
+    const listener = (_, filename) => callback(filename);
+    ipcRenderer.on('watcher:changed', listener);
+    return () => ipcRenderer.removeListener('watcher:changed', listener);
   },
 
   // Shell
-  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   showItemInFolder: (filePath) => ipcRenderer.invoke('shell:showItemInFolder', filePath),
-  openPath: (dirPath) => ipcRenderer.invoke('shell:openPath', dirPath),
   openInTerminal: (dirPath) => ipcRenderer.invoke('shell:openInTerminal', dirPath),
   openFileInEditor: (filePath) => ipcRenderer.invoke('shell:openFileInEditor', filePath),
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
@@ -143,8 +246,12 @@ contextBridge.exposeInMainWorld('api', {
       'menu:gitflow-hotfix-start', 'menu:gitflow-hotfix-finish',
       'window:focus'
     ];
-    if (validChannels.includes(channel)) {
-      ipcRenderer.on(channel, (_, ...args) => callback(...args));
-    }
+    if (!validChannels.includes(channel)) throw new Error('Unsupported menu event channel');
+    if (typeof callback !== 'function') throw new TypeError('Callback must be a function');
+    const listener = (_, ...args) => callback(...args);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
   }
 });
+
+contextBridge.exposeInMainWorld('api', api);

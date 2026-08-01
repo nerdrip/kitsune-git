@@ -9,6 +9,7 @@ out/
 build/icon.ico
 build/icon.icns
 build/icons/
+build/runtime/
 
 # OS files
 .DS_Store

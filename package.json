@@ -1,23 +1,31 @@
 {
   "name": "kitsune-git",
-  "version": "1.0.0-beta2",
+  "version": "1.0.0-beta4",
+  "private": true,
   "description": "Lightweight, fast, universal Git GUI client — like SourceTree but faster",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
     "dev": "cross-env NODE_ENV=development electron .",
+    "check": "node scripts/check-project.js",
+    "test": "node --test",
+    "verify": "npm run check && npm test",
     "generate-icons": "node scripts/generate-icons.js",
-    "prebuild:win": "npm run generate-icons",
-    "prebuild:linux": "npm run generate-icons",
-    "build:win": "electron-builder --win --x64",
-    "build:win:arm64": "electron-builder --win --arm64",
-    "build:linux": "electron-builder --linux --x64",
-    "build:linux:arm64": "electron-builder --linux --arm64",
-    "build:mac": "electron-builder --mac",
-    "build:all": "npm run generate-icons && electron-builder --win --linux",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "release": "npm run generate-icons && electron-builder --win --linux --publish always",
+    "prepare:git:win": "node scripts/prepare-git-runtime.js --platform win --arch x64",
+    "prepare:git:native": "node scripts/prepare-git-runtime.js",
+    "pack": "npm run verify && npm run generate-icons && electron-builder --dir --publish never",
+    "dist": "node scripts/build-packages.js",
+    "build:win": "node scripts/build-packages.js --platform win --type all --arch x64",
+    "build:win:arm64": "node scripts/build-packages.js --platform win --type all --arch arm64",
+    "build:win:all": "node scripts/build-packages.js --platform win --type all --arch all",
+    "build:linux": "node scripts/build-packages.js --platform linux --type all --arch x64",
+    "build:linux:arm64": "node scripts/build-packages.js --platform linux --type all --arch arm64",
+    "build:linux:all": "node scripts/build-packages.js --platform linux --type all --arch all",
+    "build:mac": "node scripts/build-packages.js --platform mac --type all --arch x64",
+    "build:mac:arm64": "node scripts/build-packages.js --platform mac --type all --arch arm64",
+    "build:mac:all": "node scripts/build-packages.js --platform mac --type all --arch all",
+    "build:all": "node scripts/build-packages.js --platform native --type all --arch all",
+    "release": "node scripts/build-packages.js --type all --arch x64 --publish always",
     "postinstall": "electron-builder install-app-deps"
   },
   "build": {
@@ -28,82 +36,85 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "asar": true,
+    "electronLanguages": ["en-US", "pl"],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    },
     "files": [
       "src/**/*",
-      "node_modules/**/*",
-      "package.json"
+      "package.json",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md",
+      "!node_modules/**/*.map",
+      "!node_modules/**/*.d.ts",
+      "!node_modules/**/{test,tests,__tests__,example,examples}/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "build/runtime/${os}-${arch}",
+        "to": "git-runtime",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        },
-        {
-          "target": "portable",
-          "arch": ["x64"]
-        }
-      ],
-      "icon": "build/icon.ico",
-      "publisherName": "KitsuneGIT"
+      "target": ["nsis", "portable"],
+      "icon": "build/icon.png"
     },
     "mac": {
       "target": [
         "dmg",
         "zip"
       ],
-      "icon": "build/icon.icns",
-      "category": "public.app-category.developer-tools"
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
     },
     "linux": {
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": ["x64"]
-        },
-        {
-          "target": "deb",
-          "arch": ["x64"]
-        },
-        {
-          "target": "rpm",
-          "arch": ["x64"]
-        },
-        {
-          "target": "tar.gz",
-          "arch": ["x64"]
-        }
-      ],
+      "target": ["AppImage", "deb", "rpm", "tar.gz"],
       "icon": "build/icons",
       "category": "Development",
+      "vendor": "KitsuneGIT",
       "maintainer": "KitsuneGIT Team",
       "synopsis": "Fast Git GUI client",
       "description": "Lightweight, fast, universal Git GUI client — like SourceTree but faster",
       "desktop": {
-        "Name": "KitsuneGIT",
-        "Comment": "Fast Git GUI Client",
-        "Categories": "Development;RevisionControl;",
-        "Keywords": "git;vcs;version control;gui;",
-        "StartupWMClass": "kitsune-git",
-        "MimeType": "x-scheme-handler/kitsunegit;"
+        "entry": {
+          "Name": "KitsuneGIT",
+          "Comment": "Fast Git GUI Client",
+          "Categories": "Development;RevisionControl;",
+          "Keywords": "git;vcs;version control;gui;",
+          "StartupWMClass": "kitsune-git"
+        }
       }
     },
     "nsis": {
+      "artifactName": "${productName}-${version}-windows-${arch}-setup.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "KitsuneGIT",
       "uninstallDisplayName": "KitsuneGIT",
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
       "license": "LICENSE"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-windows-${arch}-portable.${ext}"
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-mac-${arch}-installer.${ext}"
     },
     "publish": [
       {
         "provider": "github",
-        "owner": "OWNER",
-        "repo": "KitsuneGIT"
+        "owner": "nerdrip",
+        "repo": "kitsune-git"
       }
     ]
   },
@@ -116,14 +127,29 @@
   ],
   "author": "KitsuneGIT Team",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nerdrip/kitsune-git.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nerdrip/kitsune-git/issues"
+  },
+  "homepage": "https://github.com/nerdrip/kitsune-git#readme",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "devDependencies": {
-    "cross-env": "^7.0.3",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.8"
+    "cross-env": "^10.1.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
   },
   "dependencies": {
-    "chokidar": "^4.0.0",
-    "electron-updater": "^6.3.0",
-    "simple-git": "^3.27.0"
+    "chokidar": "^4.0.3",
+    "electron-updater": "^6.8.9",
+    "extract-zip": "^2.0.1",
+    "simple-git": "^3.36.0"
+  },
+  "overrides": {
+    "js-yaml": "4.3.0"
   }
 }

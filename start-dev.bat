@@ -16,6 +16,12 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+node -e "const [a,b]=process.versions.node.split('.').map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)" >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] Node.js 22.12.0 or newer is required.
+    pause
+    exit /b 1
+)
 
 REM Check if Git is installed
 where git >nul 2>nul
