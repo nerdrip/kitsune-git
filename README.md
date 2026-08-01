@@ -112,7 +112,7 @@ GitHub Actions verifies pull requests and pushes on Windows, macOS, and Linux. A
 
 Publishing is all-or-nothing: GitHub Release is created only after verification and all six package jobs pass, so users never see a silently incomplete release. If a run fails before creating the release, merging a fix to the release workflow, package script, runtime manifest, lockfile, or build resources automatically retries the still-missing current version even when its number did not change. This is how `1.0.0-beta5` will recover after the CI fix is merged.
 
-If a release for the package version already exists, an ordinary merge does not replace it. To repair or intentionally replace its assets, open **Actions → Build and publish release → Run workflow**, enable `rebuild_existing`, and run it from `main`. Signing and Apple notarization are enabled automatically when the repository secrets listed above are configured; otherwise the workflow produces unsigned test/community packages.
+If a release for the package version already exists, an ordinary merge does not replace it. To repair or intentionally replace its assets, open **Actions → Build and publish release → Run workflow**, enable `rebuild_existing`, and run it from `main`. Signing and Apple notarization are enabled automatically when the repository secrets listed above are configured; otherwise the workflow produces unsigned test/community packages. Empty signing secrets are removed before `electron-builder` starts so they cannot be interpreted as certificate paths, while configured credentials are passed through unchanged.
 
 ## Security model
 

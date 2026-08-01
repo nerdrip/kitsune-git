@@ -921,7 +921,13 @@ class GitService {
       const value = separator < 0 ? true : field.slice(separator + 1);
       if (key === 'worktree') {
         if (current) records.push(current);
-        current = { path: value, head: null, branch: null, bare: false, detached: false, locked: null, prunable: null };
+        let worktreePath = path.resolve(value);
+        try {
+          // Git may expand Windows 8.3 names or macOS /var -> /private/var
+          // symlinks. Return the filesystem's canonical path when it exists.
+          worktreePath = fs.realpathSync(value);
+        } catch { /* a prunable worktree may no longer exist */ }
+        current = { path: worktreePath, head: null, branch: null, bare: false, detached: false, locked: null, prunable: null };
       } else if (current) {
         if (key === 'HEAD') current.head = value;
         else if (key === 'branch') current.branch = String(value).replace(/^refs\/heads\//, '');

@@ -42,18 +42,25 @@ describe('advanced Git tools', { concurrency: 1 }, () => {
   it('adds, lists, and removes a secondary worktree', async () => {
     const worktreePath = path.join(root, 'worktree');
     await service.addWorktree({ path: worktreePath, newBranch: 'worktree-test', startPoint: hashes[1] });
-    assert.ok((await service.getWorktrees()).some(item => path.resolve(item.path) === path.resolve(worktreePath)));
+    const canonicalPath = fs.realpathSync(worktreePath);
+    assert.ok((await service.getWorktrees()).some(item => item.path === canonicalPath));
     await service.removeWorktree(worktreePath);
-    assert.ok(!(await service.getWorktrees()).some(item => path.resolve(item.path) === path.resolve(worktreePath)));
+    assert.ok(!(await service.getWorktrees()).some(item => item.path === canonicalPath));
   });
 
   it('runs a bisect session and resets it', async () => {
     const status = await service.startBisect(hashes[0], hashes[2]);
     assert.equal(status.active, true);
     assert.equal(status.current, hashes[1]);
-    const marked = await service.markBisect('bad');
-    assert.match(marked.output, /first bad commit/i);
-    await service.resetBisect();
+    let marked;
+    try {
+      marked = await service.markBisect('bad');
+    } finally {
+      // Keep subsequent tests on the original branch even if Git changes its
+      // human-readable bisect output again.
+      await service.resetBisect();
+    }
+    assert.match(marked.output, /first\s+['"]?bad['"]?\s+commit/i);
     assert.equal((await service.getBisectStatus()).active, false);
   });
 

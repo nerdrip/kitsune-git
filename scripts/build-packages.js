@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { sanitizedBuilderEnvironment } = require('./build-environment');
 const { resolveNpmCli } = require('./npm-cli');
 
 const ROOT_DIRECTORY = path.resolve(__dirname, '..');
@@ -65,8 +66,13 @@ function parseArguments(argv) {
   return options;
 }
 
-function run(command, args) {
-  const result = spawnSync(command, args, { cwd: process.cwd(), stdio: 'inherit', shell: false });
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: process.cwd(),
+    env: options.env || process.env,
+    stdio: 'inherit',
+    shell: false
+  });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status || 1);
 }
@@ -144,7 +150,7 @@ function main() {
       options.publish
     ];
     console.log(`Building ${options.platform} ${options.type} packages for ${architecture}...`);
-    run(process.execPath, builderArgs);
+    run(process.execPath, builderArgs, { env: sanitizedBuilderEnvironment(process.env) });
   }
   writeChecksums();
 }
