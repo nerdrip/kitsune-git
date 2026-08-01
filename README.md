@@ -1,5 +1,9 @@
 # KitsuneGIT 🦊
 
+[![Continuous integration](https://github.com/nerdrip/kitsune-git/actions/workflows/ci.yml/badge.svg)](https://github.com/nerdrip/kitsune-git/actions/workflows/ci.yml)
+[![Build and publish release](https://github.com/nerdrip/kitsune-git/actions/workflows/build-packages.yml/badge.svg)](https://github.com/nerdrip/kitsune-git/actions/workflows/build-packages.yml)
+[![Latest release](https://img.shields.io/github/v/release/nerdrip/kitsune-git?include_prereleases&sort=semver)](https://github.com/nerdrip/kitsune-git/releases)
+
 KitsuneGIT is a cross-platform Git desktop client built with Electron and `simple-git`. Release packages are self-contained: they include a verified Git runtime, Git Credential Manager, Git LFS, and OpenSSH tooling, while still allowing a system or custom Git executable to be selected globally or per repository.
 
 Highlights include visual Git automations, conditional app hooks, partial line/hunk staging, a three-pane conflict editor, interactive rebase with recovery refs, worktrees, reflog recovery, bisect, mailbox patches, sparse checkout, maintenance, GitFlow, repository profiles, encrypted GitHub/GitLab/Bitbucket tokens, pull-request management, SSH key/agent/known-host management, diagnostics, command palette, and English/Polish UI foundations.
@@ -88,7 +92,7 @@ npm run build:all       # every format and architecture for the native host
 node scripts/build-packages.js --help
 ```
 
-Reliable packages for all operating systems cannot be produced on one host because macOS packaging/signing requires macOS and platform toolchains differ. The native six-job matrix in `.github/workflows/build-packages.yml` builds x64 and arm64 artifacts for Windows, macOS, and Linux.
+Reliable packages for all operating systems cannot be produced on one host because macOS packaging/signing requires macOS and platform toolchains differ. The six-job matrix in `.github/workflows/build-packages.yml` builds x64 and arm64 artifacts for Windows, macOS, and Linux. macOS and Linux use native runners; Windows ARM64 is cross-built on the stable Windows x64 runner because electron-builder's icon helper is currently unreliable on GitHub's native Windows ARM runner.
 
 The runtime build inputs are pinned in `src/git/runtime-manifest.json`. Windows packages use the official MinGit ZIP; macOS/Linux jobs build the official Git source release natively. GCM and Git LFS native archives are included when the platform Git distribution does not already provide them. See [docs/RUNTIME.md](docs/RUNTIME.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
@@ -98,15 +102,17 @@ Unsigned local packages are suitable for testing. Public distribution should pro
 
 - Windows/macOS signing: `CSC_LINK` and `CSC_KEY_PASSWORD`, or separate `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` and `MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD` secrets
 - Apple notarization: `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`
-- GitHub publishing: `GH_TOKEN`
+- Local GitHub publishing: `GH_TOKEN` (GitHub Actions receives its scoped token automatically)
 
 `npm run release` publishes x64 packages for the current native host and requires release credentials. It intentionally uses one architecture so update metadata cannot be overwritten by a second architecture; arm64 packages can still be built and uploaded separately. Normal build commands use `--publish never`. The updater targets `nerdrip/kitsune-git` GitHub releases and starts only in packaged builds containing update metadata.
 
 ### Automatic GitHub releases
 
-GitHub Actions verifies pull requests and pushes on Windows, macOS, and Linux. A release build starts when a `v*` tag is pushed or when a version change in `package.json` is merged to `main`. The release workflow builds native x64 and ARM64 packages on six matching runners, combines the artifacts, generates `SHA256SUMS.txt`, and creates the corresponding GitHub Release automatically.
+GitHub Actions verifies pull requests and pushes on Windows, macOS, and Linux. A release build starts when a `v*` tag is pushed or when a version change in `package.json` is merged to `main`. The workflow builds x64 and ARM64 packages for all three systems, verifies that every expected installer and portable archive exists, combines the artifacts, generates `SHA256SUMS.txt`, and creates the corresponding GitHub Release automatically. Versions containing a suffix such as `-beta5` are marked as prereleases.
 
-If a release for the package version already exists, an ordinary merge does not replace it. Use the **Build and publish release** workflow's manual `rebuild_existing` option when the assets intentionally need to be rebuilt. Signing and Apple notarization are enabled automatically when the repository secrets listed above are configured; otherwise the workflow produces unsigned test/community packages.
+Publishing is all-or-nothing: GitHub Release is created only after verification and all six package jobs pass, so users never see a silently incomplete release. If a run fails before creating the release, merging a fix to the release workflow, package script, runtime manifest, lockfile, or build resources automatically retries the still-missing current version even when its number did not change. This is how `1.0.0-beta5` will recover after the CI fix is merged.
+
+If a release for the package version already exists, an ordinary merge does not replace it. To repair or intentionally replace its assets, open **Actions → Build and publish release → Run workflow**, enable `rebuild_existing`, and run it from `main`. Signing and Apple notarization are enabled automatically when the repository secrets listed above are configured; otherwise the workflow produces unsigned test/community packages.
 
 ## Security model
 

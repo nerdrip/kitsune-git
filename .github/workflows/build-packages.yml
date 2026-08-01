@@ -13,6 +13,13 @@ on:
       - main
     paths:
       - package.json
+      - package-lock.json
+      - .github/workflows/build-packages.yml
+      - scripts/build-packages.js
+      - scripts/generate-icons.js
+      - scripts/prepare-git-runtime.js
+      - src/git/runtime-manifest.json
+      - build/**
     tags:
       - 'v*'
 
@@ -36,7 +43,7 @@ jobs:
       target: ${{ steps.release.outputs.target }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -68,8 +75,12 @@ jobs:
           if [[ "$EVENT_NAME" == "push" && "$REF_TYPE" == "branch" ]]; then
             previous_version="$(git show "${BEFORE_SHA}:package.json" 2>/dev/null | node -e "let input=''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(JSON.parse(input).version || ''));" || true)"
             if [[ "$previous_version" == "$version" ]]; then
-              echo "package.json changed, but the package version is still $version; skipping release."
-              should_release=false
+              if gh release view "$tag" >/dev/null 2>&1; then
+                echo "Version $version is unchanged and release $tag already exists; skipping."
+                should_release=false
+              else
+                echo "Version $version is unchanged, but release $tag is missing; rebuilding it automatically."
+              fi
             fi
           fi
 
@@ -97,10 +108,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22.12.0
           cache: npm
@@ -126,28 +137,36 @@ jobs:
           - os: windows-latest
             platform: win
             arch: x64
-          - os: windows-11-arm
+            update_metadata: latest.yml
+          # electron-builder's icon helper crashes on the native Windows ARM
+          # runner. Windows x64 reliably cross-builds the same ARM64 package.
+          - os: windows-latest
             platform: win
             arch: arm64
+            update_metadata: latest.yml
           - os: macos-15-intel
             platform: mac
             arch: x64
+            update_metadata: latest-mac.yml
           - os: macos-15
             platform: mac
             arch: arm64
+            update_metadata: latest-mac.yml
           - os: ubuntu-24.04
             platform: linux
             arch: x64
+            update_metadata: latest-linux.yml
           - os: ubuntu-24.04-arm
             platform: linux
             arch: arm64
+            update_metadata: latest-linux.yml
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22.12.0
           cache: npm
@@ -169,7 +188,7 @@ jobs:
         run: node scripts/build-packages.js --platform ${{ matrix.platform }} --type all --arch ${{ matrix.arch }} --skip-verify
 
       - name: Upload installers and portable packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-packages-${{ matrix.platform }}-${{ matrix.arch }}
           path: |
@@ -188,12 +207,10 @@ jobs:
       # Publish one authoritative x64 set so ARM64 metadata cannot overwrite it.
       - name: Upload automatic-update metadata
         if: matrix.arch == 'x64'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-update-metadata-${{ matrix.platform }}
-          path: |
-            dist/*.yml
-            dist/*.yaml
+          path: dist/${{ matrix.update_metadata }}
           if-no-files-found: error
           retention-days: 14
 
@@ -209,7 +226,7 @@ jobs:
       contents: write
     steps:
       - name: Download every native package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: release-assets
@@ -217,6 +234,8 @@ jobs:
 
       - name: Verify assets and generate checksums
         shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -226,12 +245,32 @@ jobs:
             exit 1
           fi
 
-          for arch in x64 arm64; do
-            if ! find release-assets -maxdepth 1 -type f -name "*-${arch}*" -print -quit | grep -q .; then
-              echo "No $arch package was produced" >&2
+          require_asset() {
+            local pattern="$1"
+            if ! find release-assets -maxdepth 1 -type f -name "$pattern" -print -quit | grep -q .; then
+              echo "Required release asset is missing: $pattern" >&2
               exit 1
             fi
+          }
+
+          for arch in x64 arm64; do
+            require_asset "KitsuneGIT-${VERSION}-windows-${arch}-setup.exe"
+            require_asset "KitsuneGIT-${VERSION}-windows-${arch}-portable.exe"
+            require_asset "KitsuneGIT-${VERSION}-mac-${arch}-installer.dmg"
+            require_asset "KitsuneGIT-${VERSION}-mac-${arch}.zip"
+            require_asset "KitsuneGIT-${VERSION}-linux-${arch}.tar.gz"
           done
+
+          # Linux package ecosystems use their own canonical x64/ARM64 names.
+          require_asset "KitsuneGIT-${VERSION}-linux-x86_64.AppImage"
+          require_asset "KitsuneGIT-${VERSION}-linux-amd64.deb"
+          require_asset "KitsuneGIT-${VERSION}-linux-x86_64.rpm"
+          require_asset "KitsuneGIT-${VERSION}-linux-arm64.AppImage"
+          require_asset "KitsuneGIT-${VERSION}-linux-arm64.deb"
+          require_asset "KitsuneGIT-${VERSION}-linux-aarch64.rpm"
+          require_asset "latest.yml"
+          require_asset "latest-mac.yml"
+          require_asset "latest-linux.yml"
 
           (
             cd release-assets

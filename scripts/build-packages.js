@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { resolveNpmCli } = require('./npm-cli');
 
 const ROOT_DIRECTORY = path.resolve(__dirname, '..');
 const PROJECT_VERSION = require(path.join(ROOT_DIRECTORY, 'package.json')).version;
@@ -71,12 +72,10 @@ function run(command, args) {
 }
 
 function runNpm(args) {
-  const candidates = [
-    process.env.npm_execpath,
-    path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
-  ].filter(Boolean);
-  const npmCli = candidates.find(candidate => fs.existsSync(candidate));
-  if (!npmCli) throw new Error('Unable to locate npm-cli.js next to the active Node.js runtime');
+  const npmCli = resolveNpmCli();
+  if (!npmCli) {
+    throw new Error(`Unable to locate npm-cli.js for the active Node.js runtime (${process.execPath})`);
+  }
   run(process.execPath, [npmCli, ...args]);
 }
 

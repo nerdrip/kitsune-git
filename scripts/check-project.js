@@ -92,8 +92,11 @@ if (!extraResources.includes('build/runtime/${os}-${arch}') || !extraResources.i
 if (!fs.existsSync(path.join(ROOT, 'THIRD_PARTY_NOTICES.md'))) fail('Missing third-party runtime notices');
 
 const workflowSource = read('.github/workflows/build-packages.yml');
-for (const runner of ['windows-latest', 'windows-11-arm', 'macos-15-intel', 'macos-15', 'ubuntu-24.04', 'ubuntu-24.04-arm']) {
-  if (!workflowSource.includes(`os: ${runner}`)) fail(`Native package workflow is missing runner: ${runner}`);
+for (const runner of ['windows-latest', 'macos-15-intel', 'macos-15', 'ubuntu-24.04', 'ubuntu-24.04-arm']) {
+  if (!workflowSource.includes(`os: ${runner}`)) fail(`Package workflow is missing runner: ${runner}`);
+}
+if ((workflowSource.match(/os: windows-latest/g) || []).length < 2) {
+  fail('Package workflow does not cross-build both Windows architectures on the stable runner');
 }
 
 const mainSource = read('src/main/main.js');

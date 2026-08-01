@@ -13,7 +13,7 @@ The selection can be global or overridden per repository. The status bar and Set
 
 `src/git/runtime-manifest.json` pins the Git, Git for Windows, Git Credential Manager, and Git LFS versions, official HTTPS URLs, and SHA-256 digests. `scripts/prepare-git-runtime.js` refuses an archive whose digest differs.
 
-Windows uses the official MinGit ZIP. macOS and Linux build the official Git source tarball on a native runner, then add the matching native GCM and Git LFS distributions. electron-builder copies only `build/runtime/<platform>-<arch>` to `resources/git-runtime`.
+Windows uses the official MinGit ZIP. macOS and Linux build the official Git source tarball on a native runner, then add the matching native GCM and Git LFS distributions. Git 2.55's still-optional Rust components are disabled so clean release hosts need only the documented C toolchain and native libraries. electron-builder copies only `build/runtime/<platform>-<arch>` to `resources/git-runtime`.
 
 ## Runtime layout
 

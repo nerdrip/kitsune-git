@@ -197,6 +197,9 @@ async function prepareUnix(staging, platform, arch, cacheDirectory) {
       'NO_GETTEXT=YesPlease',
       'NO_PERL=YesPlease',
       'NO_PYTHON=YesPlease',
+      // Git 2.55 still supports a C-only build. Keeping Rust optional makes
+      // the bundled runtime reproducible on clean release hosts.
+      'NO_RUST=YesPlease',
       'NO_INSTALL_HARDLINKS=YesPlease'
     ];
     run('make', [...makeOptions, 'all'], { cwd: sourceDirectory });

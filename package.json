@@ -4,6 +4,7 @@
   "private": true,
   "description": "Lightweight, fast, universal Git GUI client — like SourceTree but faster",
   "main": "src/main/main.js",
+  "desktopName": "kitsune-git.desktop",
   "scripts": {
     "start": "electron .",
     "dev": "cross-env NODE_ENV=development electron .",
@@ -82,6 +83,7 @@
       "category": "Development",
       "vendor": "KitsuneGIT",
       "maintainer": "KitsuneGIT Team",
+      "syncDesktopName": true,
       "synopsis": "Fast Git GUI client",
       "description": "Lightweight, fast, universal Git GUI client — like SourceTree but faster",
       "desktop": {
