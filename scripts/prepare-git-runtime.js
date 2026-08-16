@@ -6,7 +6,7 @@ const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const extractZip = require('extract-zip');
+const { extractZip } = require('../src/main/safe-zip');
 const manifest = require('../src/git/runtime-manifest.json');
 
 const ROOT = path.resolve(__dirname, '..');

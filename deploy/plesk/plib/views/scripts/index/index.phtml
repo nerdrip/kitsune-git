@@ -1,0 +1,15 @@
+<h2>KitsuneGIT Web</h2>
+<p>Service status: <strong><?php echo $this->escape($this->serviceStatus); ?></strong></p>
+<?php if ($this->publicUrl): ?>
+  <p><a class="btn action" href="<?php echo $this->escape($this->publicUrl); ?>" target="_blank" rel="noopener">Open KitsuneGIT Web</a></p>
+  <p>Git SSH base: <code><?php echo $this->escape($this->sshUrl); ?></code></p>
+<?php endif; ?>
+<?php if ($this->adminToken): ?>
+  <p><label>Desktop / API administrator token<br><input type="text" readonly value="<?php echo $this->escape($this->adminToken); ?>" style="width:100%"></label></p>
+<?php endif; ?>
+<form method="post" action="<?php echo pm_Context::getActionUrl('index', 'restart'); ?>">
+  <button type="submit" class="btn">Restart service</button>
+</form>
+<hr>
+<h3>Install or upgrade</h3>
+<?php echo $this->form; ?>

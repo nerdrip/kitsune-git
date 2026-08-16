@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module>
+  <id>kitsune-git</id>
+  <name>KitsuneGIT Web</name>
+  <description>Deploy and manage a self-hosted KitsuneGIT collaboration server.</description>
+  <category>tools</category>
+  <version>1.3.0</version>
+  <release>1</release>
+  <vendor>KitsuneGIT Team</vendor>
+  <url>https://github.com/nerdrip/kitsune-git</url>
+  <help_url>https://github.com/nerdrip/kitsune-git/tree/main/docs</help_url>
+  <support_url>https://github.com/nerdrip/kitsune-git/issues</support_url>
+  <plesk_min_version>18.0.0</plesk_min_version>
+</module>

@@ -1,0 +1,20 @@
+#!/usr/bin/env node
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const { spawnSync } = require('node:child_process');
+const { previewSignature, targetUrl } = require('./preview-service');
+
+const domain = String(process.env.KITSUNE_PLESK_DOMAIN || ''); const secret = String(process.env.KITSUNE_PREVIEW_SECRET || ''); const port = Number(process.env.KITSUNE_PREVIEW_HELPER_PORT || 4781);
+if (!/^[A-Za-z0-9][A-Za-z0-9.-]{1,252}$/.test(domain) || secret.length < 32 || !Number.isInteger(port)) throw new Error('Plesk preview helper configuration is invalid');
+function equal(a, b) { const left = Buffer.from(String(a || '')); const right = Buffer.from(String(b || '')); return left.length === right.length && crypto.timingSafeEqual(left, right); }
+function plesk(args, allowFailure = false) { const result = spawnSync('/usr/sbin/plesk', args, { encoding: 'utf8', shell: false, timeout: 30_000 }); if (result.status !== 0 && !allowFailure) throw new Error(String(result.stderr || result.stdout || 'Plesk command failed').slice(0, 1000)); return result; }
+function slug(input) { const value = String(input || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 50); if (!value) throw new Error('Preview name is invalid'); return value; }
+const server = http.createServer((request, response) => { void (async () => { try { if (request.method !== 'POST' || request.url !== '/') throw Object.assign(new Error('Not found'), { statusCode: 404 }); const chunks = []; let size = 0; for await (const chunk of request) { size += chunk.length; if (size > 64 * 1024) throw Object.assign(new Error('Request too large'), { statusCode: 413 }); chunks.push(chunk); } const body = Buffer.concat(chunks).toString('utf8'); const timestamp = String(request.headers['x-kitsune-timestamp'] || ''); if (!/^\d{10}$/.test(timestamp) || Math.abs(Date.now() / 1000 - Number(timestamp)) > 300 || !equal(request.headers['x-kitsune-signature'], `sha256=${previewSignature(secret, timestamp, body)}`)) throw Object.assign(new Error('Unauthorized'), { statusCode: 401 }); const input = JSON.parse(body);
+    if (input.action === 'create') { const name = slug(`${input.project}-${input.mergeRequestIid}-${String(input.commitSha || '').slice(0, 8)}`); const fqdn = `${name}.${domain}`; const target = targetUrl(input.targetUrl); const existing = plesk(['bin', 'subdomain', '--info', name, '-domain', domain], true).status === 0; if (!existing) plesk(['bin', 'subdomain', '--create', name, '-domain', domain, '-www-root', `preview-${name}`]); const configRoot = path.resolve('/var/www/vhosts/system', fqdn, 'conf'); if (!configRoot.startsWith(`/var/www/vhosts/system/${fqdn}/`)) throw new Error('Preview path escaped Plesk root'); fs.mkdirSync(configRoot, { recursive: true }); fs.writeFileSync(path.join(configRoot, 'vhost_nginx.conf'), `# kitsune-preview-managed\nlocation / { proxy_pass ${target}; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; }\n`, { mode: 0o600 }); plesk(['sbin', 'httpdmng', '--reconfigure-domain', fqdn]); return send(response, existing ? 200 : 201, { url: `https://${fqdn}`, reused: existing }); }
+    if (input.action === 'delete') { const url = new URL(input.url); if (!url.hostname.endsWith(`.${domain}`)) throw new Error('Preview domain is invalid'); const name = url.hostname.slice(0, -(domain.length + 1)); plesk(['bin', 'subdomain', '--remove', name, '-domain', domain]); return send(response, 200, { deleted: true }); }
+    throw new Error('Preview action is invalid');
+  } catch (error) { send(response, error.statusCode || 400, { error: error.message }); } })(); });
+function send(response, status, value) { const body = Buffer.from(JSON.stringify(value)); response.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': body.length, 'Cache-Control': 'no-store' }); response.end(body); }
+server.listen(port, '127.0.0.1', () => console.log(`KitsuneGIT Plesk preview helper: 127.0.0.1:${port}`));

@@ -1,13 +1,19 @@
 {
   "name": "kitsune-git",
-  "version": "1.0.0-beta5",
+  "version": "1.1.0",
   "private": true,
-  "description": "Lightweight, fast, universal Git GUI client — like SourceTree but faster",
+  "description": "Sovereign Git forge and fast cross-platform desktop client",
   "main": "src/main/main.js",
   "desktopName": "kitsune-git.desktop",
   "scripts": {
     "start": "electron .",
     "dev": "cross-env NODE_ENV=development electron .",
+    "web": "node src/server/cli.js",
+    "web:dev": "cross-env KITSUNE_DATA_PATH=.kitsune-web node --watch src/server/cli.js",
+    "web:backup": "node src/server/backup-cli.js create",
+    "web:restore": "node src/server/backup-cli.js restore",
+    "web:migrate-sqlite": "node src/server/metadata-cli.js migrate-to-sqlite",
+    "build:plesk": "node scripts/build-plesk-extension.js",
     "check": "node scripts/check-project.js",
     "test": "node --test",
     "verify": "npm run check && npm test",
@@ -38,7 +44,10 @@
       "buildResources": "build"
     },
     "asar": true,
-    "electronLanguages": ["en-US", "pl"],
+    "electronLanguages": [
+      "en-US",
+      "pl"
+    ],
     "electronFuses": {
       "runAsNode": false,
       "enableCookieEncryption": true,
@@ -60,11 +69,16 @@
       {
         "from": "build/runtime/${os}-${arch}",
         "to": "git-runtime",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "build/icon.png"
     },
     "mac": {
@@ -78,7 +92,12 @@
       "gatekeeperAssess": false
     },
     "linux": {
-      "target": ["AppImage", "deb", "rpm", "tar.gz"],
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm",
+        "tar.gz"
+      ],
       "icon": "build/icons",
       "category": "Development",
       "vendor": "KitsuneGIT",
@@ -146,12 +165,16 @@
     "electron-builder": "^26.15.3"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^13.3.2",
     "chokidar": "^4.0.3",
     "electron-updater": "^6.8.9",
-    "extract-zip": "^2.0.1",
-    "simple-git": "^3.36.0"
+    "jose": "^6.2.9",
+    "ldapts": "^9.0.0",
+    "simple-git": "^3.36.0",
+    "ssh2": "^1.17.0",
+    "yauzl": "^3.4.0"
   },
   "overrides": {
-    "js-yaml": "4.3.0"
+    "js-yaml": "4.3.1"
   }
 }

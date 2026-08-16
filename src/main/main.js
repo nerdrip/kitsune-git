@@ -18,6 +18,8 @@ const { GitRuntimeManager } = require('../git/runtime-manager');
 const { CredentialManager } = require('../auth/credential-manager');
 const { DiagnosticsService } = require('./diagnostics');
 const { ProviderManager } = require('../integrations/provider-manager');
+const { KitsuneServerManager } = require('../integrations/kitsune-server-manager');
+const { KitsuneDraftManager } = require('../integrations/kitsune-draft-manager');
 const { MacroManager } = require('../automation/macro-manager');
 const { MacroRunner } = require('../automation/macro-runner');
 const { OperationQueue } = require('./operation-queue');
@@ -47,7 +49,7 @@ const MUTATING_GIT_CHANNELS = new Set([
   'git:gitflowHotfixFinish', 'git:pushWithUpstream', 'git:addWorktree', 'git:removeWorktree', 'git:pruneWorktrees',
   'git:recoverToBranch', 'git:startBisect', 'git:markBisect', 'git:resetBisect', 'git:importPatch',
   'git:initializeLfs', 'git:trackLfs', 'git:setSparsePaths', 'git:disableSparse', 'git:runMaintenance',
-  'git:setMaintenance', 'profiles:apply', 'automation:run'
+  'git:setMaintenance', 'profiles:apply', 'automation:run', 'kitsune:cloneProject'
 ]);
 
 let operationQueue;
@@ -96,6 +98,11 @@ const providerManager = new ProviderManager({
   userDataPath: app.getPath('userData'),
   safeStorage
 });
+const kitsuneServerManager = new KitsuneServerManager({
+  userDataPath: app.getPath('userData'),
+  safeStorage
+});
+const kitsuneDraftManager = new KitsuneDraftManager({ userDataPath: app.getPath('userData'), safeStorage, serverManager: kitsuneServerManager });
 const profileManager = new ProfileManager({ userDataPath: app.getPath('userData') });
 const macroManager = new MacroManager({ userDataPath: app.getPath('userData') });
 
@@ -774,6 +781,38 @@ ipcMain.handle('provider:pullRequests', async (_, repository) => {
 ipcMain.handle('provider:createPullRequest', async (_, repository, input) => {
   if (!gitService) throw new Error('No repository opened');
   return await providerManager.createPullRequest(repository, input);
+});
+
+ipcMain.handle('kitsune:status', () => kitsuneServerManager.status());
+
+ipcMain.handle('kitsune:connect', async (_, input) => {
+  return await kitsuneServerManager.connect(input);
+});
+
+ipcMain.handle('kitsune:disconnect', () => kitsuneServerManager.disconnect());
+
+ipcMain.handle('kitsune:projects', async () => await kitsuneServerManager.projects());
+ipcMain.handle('kitsune:search', async (_, query) => await kitsuneServerManager.search(query));
+ipcMain.handle('kitsune:notifications', async () => await kitsuneServerManager.notifications());
+ipcMain.handle('kitsune:markNotificationRead', async (_, id) => await kitsuneServerManager.markNotificationRead(id));
+ipcMain.handle('kitsune:drafts', () => kitsuneDraftManager.list());
+ipcMain.handle('kitsune:saveDraft', (_, input) => kitsuneDraftManager.save(input));
+ipcMain.handle('kitsune:removeDraft', (_, id) => kitsuneDraftManager.remove(id));
+ipcMain.handle('kitsune:syncDrafts', async () => await kitsuneDraftManager.sync());
+ipcMain.handle('kitsune:resolveDraftConflict', (_, clientId, choice, serverDraft) => kitsuneDraftManager.resolveConflict(clientId, choice, serverDraft));
+ipcMain.handle('kitsune:publishDraft', async (_, clientId) => await kitsuneDraftManager.publish(clientId));
+
+ipcMain.handle('kitsune:cloneProject', async (_, projectId, targetPath) => {
+  const clone = await kitsuneServerManager.cloneConfiguration(projectId);
+  const runtime = await runtimeManager.resolve(targetPath);
+  const environment = await credentialManager.getEnvironment(targetPath, runtime);
+  const nextService = new GitService(targetPath, { ...runtime, environment: { ...environment, ...clone.environment } });
+  const status = await nextService.clone(clone.url, targetPath);
+  delete nextService.runtime.environment.KITSUNE_ASKPASS_TOKEN;
+  delete nextService.runtime.environment.GIT_ASKPASS;
+  nextService.git = nextService._createGit(targetPath);
+  gitService = nextService;
+  return status;
 });
 
 ipcMain.handle('profiles:list', () => profileManager.list());

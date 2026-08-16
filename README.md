@@ -6,6 +6,8 @@
 
 KitsuneGIT is a cross-platform Git desktop client built with Electron and `simple-git`. Release packages are self-contained: they include a verified Git runtime, Git Credential Manager, Git LFS, and OpenSSH tooling, while still allowing a system or custom Git executable to be selected globally or per repository.
 
+KitsuneGIT Web adds a self-hosted Sovereign Forge: Git Smart HTTP/SSH, signed Git-native collaboration refs, multi-peer Forge Mesh, GitHub/GitLab/Gitea migration, cross-repository Change Intelligence, explainable access, stacked merge requests, portable change bundles, external quality gates, privacy-routed AI, Plesk previews, an Attention Engine, and secure local-first Desktop review. See [docs/WEB.md](docs/WEB.md).
+
 Highlights include visual Git automations, conditional app hooks, partial line/hunk staging, a three-pane conflict editor, interactive rebase with recovery refs, worktrees, reflog recovery, bisect, mailbox patches, sparse checkout, maintenance, GitFlow, repository profiles, encrypted GitHub/GitLab/Bitbucket tokens, pull-request management, SSH key/agent/known-host management, diagnostics, command palette, and English/Polish UI foundations.
 
 ## Automation Studio
@@ -110,7 +112,7 @@ Unsigned local packages are suitable for testing. Public distribution should pro
 
 GitHub Actions verifies pull requests and pushes on Windows, macOS, and Linux. A release build starts when a `v*` tag is pushed or when a version change in `package.json` is merged to `main`. The workflow builds x64 and ARM64 packages for all three systems, verifies that every expected installer and portable archive exists, combines the artifacts, generates `SHA256SUMS.txt`, and creates the corresponding GitHub Release automatically. Versions containing a suffix such as `-beta5` are marked as prereleases.
 
-Publishing is all-or-nothing: GitHub Release is created only after verification and all six package jobs pass, so users never see a silently incomplete release. If a run fails before creating the release, merging a fix to the release workflow, package script, runtime manifest, lockfile, or build resources automatically retries the still-missing current version even when its number did not change. This is how `1.0.0-beta5` will recover after the CI fix is merged.
+Publishing is all-or-nothing: GitHub Release is created only after verification and all six package jobs pass, so users never see a silently incomplete release. If a run fails before creating the release, merging a fix to the release workflow, package script, runtime manifest, lockfile, or build resources automatically retries the still-missing current version even when its number did not change.
 
 If a release for the package version already exists, an ordinary merge does not replace it. To repair or intentionally replace its assets, open **Actions → Build and publish release → Run workflow**, enable `rebuild_existing`, and run it from `main`. Signing and Apple notarization are enabled automatically when the repository secrets listed above are configured; otherwise the workflow produces unsigned test/community packages. Empty signing secrets are removed before `electron-builder` starts so they cannot be interpreted as certificate paths, while configured credentials are passed through unchanged.
 
@@ -128,6 +130,12 @@ If a release for the package version already exists, an ordinary merge does not 
 
 See [docs/AUDIT.md](docs/AUDIT.md) for the detailed audit, applied fixes, verification, and remaining release considerations.
 
+## KitsuneGIT Web
+
+`npm run web` starts the self-hosted collaboration server: Smart HTTP and SSH repositories, Git LFS, Git-native collaboration refs, GitHub/GitLab/Gitea Forge Mesh, session/passkey/SSO identity, inherited and expiring roles, rulesets/CODEOWNERS, stacked merge requests, Change Intelligence, semantic review and merge queue, portable change bundles, issues/boards, packages and OCI registry, Attention, signed integrations, external quality gates, privacy-routed AI, previews, quotas, audit, backup/restore, and the browser dashboard. Docker Compose and a native Plesk extension are included; Desktop synchronizes encrypted offline issue, MR, and review drafts.
+
+The server intentionally contains no pipeline engine or runner. CI/CD remains the responsibility of Kitsune Test; a future integration will connect it as an external service. See [docs/WEB.md](docs/WEB.md) for configuration and API details.
+
 ## Project structure
 
 ```text
@@ -138,6 +146,8 @@ src/git/                   Git service, runtime manager, patches, and validation
 src/auth/                  GCM, SSH keys, agent, and known-host manager
 src/integrations/          Encrypted Git hosting integrations
 src/renderer/              HTML, CSS, and renderer application
+src/server/                Self-hosted Git collaboration server and web UI
+deploy/plesk/              Native Plesk extension
 scripts/check-project.js   Dependency-free static/project checks
 scripts/build-packages.js  Cross-platform package orchestration
 scripts/prepare-git-runtime.js  Verified native Git/GCM/LFS preparation
