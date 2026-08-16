@@ -1,0 +1,21 @@
+services:
+  kitsune-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    environment:
+      KITSUNE_ADMIN_TOKEN: ${KITSUNE_ADMIN_TOKEN:?set a random token of at least 24 characters}
+      KITSUNE_SECRET_KEY: ${KITSUNE_SECRET_KEY:?set a random 32-byte hexadecimal key}
+      KITSUNE_PUBLIC_URL: ${KITSUNE_PUBLIC_URL:-http://localhost:4780}
+      KITSUNE_LFS_MAX_OBJECT_BYTES: ${KITSUNE_LFS_MAX_OBJECT_BYTES:-10737418240}
+      KITSUNE_PROJECT_STORAGE_LIMIT_BYTES: ${KITSUNE_PROJECT_STORAGE_LIMIT_BYTES:-0}
+      KITSUNE_METADATA_BACKEND: ${KITSUNE_METADATA_BACKEND:-sqlite}
+    ports:
+      - "127.0.0.1:4780:4780"
+      - "2222:2222"
+    volumes:
+      - kitsune-data:/data
+
+volumes:
+  kitsune-data:

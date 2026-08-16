@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KitsuneGIT Web</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/features.css">
+</head>
+<body>
+  <header><a class="brand" href="/">Kitsune<span>GIT</span></a><nav><button id="attention">Attention</button><button id="search">Search</button><button id="notifications">Notifications</button><button id="ssh-keys">SSH keys</button><button id="account">Account</button><button id="refresh">Refresh</button><button id="connect">Sign in</button></nav></header>
+  <main>
+    <section class="hero"><p class="eyebrow">Your code. Your infrastructure.</p><h1>Projects without the platform tax.</h1><p>Host repositories, pull mirrors from GitHub or GitLab, and work from KitsuneGIT Desktop.</p></section>
+    <section class="toolbar"><div><h2>Projects</h2><p id="status">Sign in to your workspace.</p></div><button id="new-project" class="primary">New project</button><button id="import-project" class="primary">Import / mirror</button></section>
+    <section id="projects" class="grid"></section>
+    <section id="project-detail" class="detail" hidden></section>
+  </main>
+  <dialog id="form-dialog"><form method="dialog"><div class="dialog-head"><h2 id="form-title">New project</h2><button value="cancel" aria-label="Close">×</button></div><label>Name<input name="name" required maxlength="128"></label><label>Namespace<input name="namespace" value="root" required></label><label>Description<textarea name="description"></textarea></label><label>Visibility<select name="visibility"><option>private</option><option>internal</option><option>public</option></select></label><div id="import-fields" hidden><label>Provider<select name="sourceProvider"><option>github</option><option>gitlab</option><option>git</option></select></label><label>Clone URL<input name="sourceUrl" type="url"></label><label>Provider token (private repositories; never stored)<input name="sourceToken" type="password" autocomplete="off"></label><label class="check"><input name="mirror" type="checkbox"> Keep synchronized</label><label>Interval (minutes)<input name="mirrorIntervalMinutes" type="number" min="5" value="30"></label></div><p id="form-error" class="error"></p><div class="actions"><button value="cancel">Cancel</button><button id="submit" type="submit" value="default" class="primary">Create</button></div></form></dialog>
+  <dialog id="info-dialog"><div class="info-dialog"><div class="dialog-head"><h2 id="info-title"></h2><button id="close-info" aria-label="Close">×</button></div><div id="info-content"></div></div></dialog>
+  <dialog id="login-dialog"><form id="login-form"><div class="dialog-head"><h2>Sign in</h2><button type="button" id="close-login" aria-label="Close">×</button></div><label>Username or email<input name="identifier" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><p id="login-error" class="error"></p><div class="actions"><button type="button" id="admin-token">Admin token</button><button type="button" id="passkey-login">Use passkey</button><button type="button" id="ldap-login" hidden>LDAPS</button><button type="button" id="oidc-login" hidden>Company SSO</button><button type="submit" class="primary">Sign in</button></div></form></dialog>
+  <script src="/app.js"></script>
+</body>
+</html>

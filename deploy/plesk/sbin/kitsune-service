@@ -1,0 +1,193 @@
+#!/bin/sh
+set -eu
+
+ACTION="${1:-status}"
+APP_ROOT="/opt/kitsune-git"
+DATA_ROOT="/var/lib/kitsune-git"
+ENV_FILE="/etc/kitsune-git.env"
+SERVICE_FILE="/etc/systemd/system/kitsune-git.service"
+PREVIEW_SERVICE_FILE="/etc/systemd/system/kitsune-git-preview.service"
+DOMAIN_FILE="/etc/kitsune-git-domain"
+
+require_linux() {
+  [ "$(uname -s)" = "Linux" ] || { echo "Linux is required" >&2; exit 2; }
+  command -v systemctl >/dev/null 2>&1 || { echo "systemd is required" >&2; exit 2; }
+}
+
+install_release() {
+  RELEASE_URL="${2:-}"
+  EXPECTED_SHA="${3:-}"
+  DOMAIN="${4:-}"
+  SSH_PORT="${5:-2222}"
+  echo "$RELEASE_URL" | grep -Eq '^https://[^[:space:]]+$' || { echo "Release URL must use HTTPS" >&2; exit 2; }
+  echo "$EXPECTED_SHA" | grep -Eq '^[a-f0-9]{64}$' || { echo "Invalid SHA-256" >&2; exit 2; }
+  echo "$DOMAIN" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]{0,251}\.[A-Za-z]{2,63}$' || { echo "Invalid Plesk domain" >&2; exit 2; }
+  echo "$SSH_PORT" | grep -Eq '^[0-9]+$' && [ "$SSH_PORT" -ge 1024 ] && [ "$SSH_PORT" -le 65535 ] || { echo "Invalid SSH port" >&2; exit 2; }
+  VHOST_ROOT="/var/www/vhosts/system/$DOMAIN/conf"
+  [ -d "$VHOST_ROOT" ] || { echo "Plesk domain does not exist: $DOMAIN" >&2; exit 2; }
+  NGINX_CONFIG="$VHOST_ROOT/vhost_nginx.conf"
+  if [ -s "$NGINX_CONFIG" ] && ! grep -q '# kitsune-git-managed' "$NGINX_CONFIG"; then
+    echo "The domain already has custom nginx directives; use a dedicated empty domain" >&2
+    exit 4
+  fi
+  if [ -f "$DOMAIN_FILE" ]; then
+    OLD_DOMAIN="$(cat "$DOMAIN_FILE")"
+    OLD_CONFIG="/var/www/vhosts/system/$OLD_DOMAIN/conf/vhost_nginx.conf"
+    if [ "$OLD_DOMAIN" != "$DOMAIN" ] && [ -f "$OLD_CONFIG" ] && grep -q '# kitsune-git-managed' "$OLD_CONFIG"; then
+      rm -f -- "$OLD_CONFIG"
+      plesk sbin httpdmng --reconfigure-domain "$OLD_DOMAIN" || true
+    fi
+  fi
+  command -v node >/dev/null 2>&1 || { echo "Node.js 22+ is required" >&2; exit 2; }
+  command -v npm >/dev/null 2>&1 || { echo "npm is required" >&2; exit 2; }
+  command -v git >/dev/null 2>&1 || { echo "Git is required" >&2; exit 2; }
+  NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+  [ "$NODE_MAJOR" -ge 22 ] || { echo "Node.js 22+ is required" >&2; exit 2; }
+
+  TMP_ROOT="$(mktemp -d /tmp/kitsune-git.XXXXXX)"
+  trap 'rm -rf -- "$TMP_ROOT"' EXIT INT TERM
+  curl --fail --location --proto '=https' --tlsv1.2 "$RELEASE_URL" --output "$TMP_ROOT/release.tar.gz"
+  ACTUAL_SHA="$(sha256sum "$TMP_ROOT/release.tar.gz" | awk '{print $1}')"
+  [ "$ACTUAL_SHA" = "$EXPECTED_SHA" ] || { echo "Release checksum mismatch" >&2; exit 3; }
+  mkdir "$TMP_ROOT/source"
+  tar -xzf "$TMP_ROOT/release.tar.gz" -C "$TMP_ROOT/source" --strip-components=1
+  [ -f "$TMP_ROOT/source/package.json" ] && [ -f "$TMP_ROOT/source/src/server/cli.js" ] || { echo "Invalid KitsuneGIT release" >&2; exit 3; }
+  (cd "$TMP_ROOT/source" && npm ci --omit=dev --ignore-scripts)
+
+  mkdir -p "$DATA_ROOT"
+  chmod 750 "$DATA_ROOT"
+  if [ ! -f "$ENV_FILE" ]; then
+    ADMIN_TOKEN="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+    SECRET_KEY="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+    PREVIEW_SECRET="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+    umask 077
+    {
+      echo "KITSUNE_HOST=127.0.0.1"
+      echo "KITSUNE_PORT=4780"
+      echo "KITSUNE_SSH_HOST=0.0.0.0"
+      echo "KITSUNE_SSH_PORT=$SSH_PORT"
+      echo "KITSUNE_METADATA_BACKEND=sqlite"
+      echo "KITSUNE_DATA_PATH=$DATA_ROOT"
+      echo "KITSUNE_ADMIN_TOKEN=$ADMIN_TOKEN"
+      echo "KITSUNE_SECRET_KEY=$SECRET_KEY"
+      echo "KITSUNE_LFS_MAX_OBJECT_BYTES=10737418240"
+      echo "KITSUNE_PUBLIC_URL=https://$DOMAIN"
+      echo "KITSUNE_PLESK_DOMAIN=$DOMAIN"
+      echo "KITSUNE_PREVIEW_HELPER_PORT=4781"
+      echo "KITSUNE_PREVIEW_PROVISIONER_URL=http://127.0.0.1:4781/"
+      echo "KITSUNE_PREVIEW_SECRET=$PREVIEW_SECRET"
+    } > "$ENV_FILE"
+  else
+    sed -i "s|^KITSUNE_PUBLIC_URL=.*$|KITSUNE_PUBLIC_URL=https://$DOMAIN|" "$ENV_FILE"
+    if grep -q '^KITSUNE_PLESK_DOMAIN=' "$ENV_FILE"; then sed -i "s|^KITSUNE_PLESK_DOMAIN=.*$|KITSUNE_PLESK_DOMAIN=$DOMAIN|" "$ENV_FILE"; else printf '%s\n' "KITSUNE_PLESK_DOMAIN=$DOMAIN" >> "$ENV_FILE"; fi
+    grep -q '^KITSUNE_PREVIEW_HELPER_PORT=' "$ENV_FILE" || printf '%s\n' "KITSUNE_PREVIEW_HELPER_PORT=4781" >> "$ENV_FILE"
+    grep -q '^KITSUNE_PREVIEW_PROVISIONER_URL=' "$ENV_FILE" || printf '%s\n' "KITSUNE_PREVIEW_PROVISIONER_URL=http://127.0.0.1:4781/" >> "$ENV_FILE"
+    if ! grep -q '^KITSUNE_PREVIEW_SECRET=' "$ENV_FILE"; then PREVIEW_SECRET="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"; printf '%s\n' "KITSUNE_PREVIEW_SECRET=$PREVIEW_SECRET" >> "$ENV_FILE"; fi
+    if grep -q '^KITSUNE_SSH_PORT=' "$ENV_FILE"; then sed -i "s|^KITSUNE_SSH_PORT=.*$|KITSUNE_SSH_PORT=$SSH_PORT|" "$ENV_FILE"; else printf '%s\n' "KITSUNE_SSH_HOST=0.0.0.0" "KITSUNE_SSH_PORT=$SSH_PORT" >> "$ENV_FILE"; fi
+  fi
+  chmod 600 "$ENV_FILE"
+
+  rm -rf -- "$APP_ROOT.previous"
+  if [ -d "$APP_ROOT" ]; then mv -- "$APP_ROOT" "$APP_ROOT.previous"; fi
+  mv -- "$TMP_ROOT/source" "$APP_ROOT"
+  cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=KitsuneGIT Web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=psaadm
+Group=psaadm
+EnvironmentFile=$ENV_FILE
+WorkingDirectory=$APP_ROOT
+ExecStart=/usr/bin/env node $APP_ROOT/src/server/cli.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$DATA_ROOT
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  cat > "$PREVIEW_SERVICE_FILE" <<EOF
+[Unit]
+Description=KitsuneGIT Plesk Preview Provisioner
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=$ENV_FILE
+WorkingDirectory=$APP_ROOT
+ExecStart=/usr/bin/env node $APP_ROOT/src/server/plesk-preview-helper.js
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  chown -R psaadm:psaadm "$DATA_ROOT"
+  cat > "$NGINX_CONFIG" <<EOF
+# kitsune-git-managed
+location ~ ^/(?!.well-known/acme-challenge).*$ {
+    proxy_pass http://127.0.0.1:4780;
+    proxy_http_version 1.1;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+    client_max_body_size 0;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+}
+EOF
+  chmod 600 "$NGINX_CONFIG"
+  printf '%s\n' "$DOMAIN" > "$DOMAIN_FILE"
+  plesk sbin httpdmng --reconfigure-domain "$DOMAIN"
+  systemctl daemon-reload
+  systemctl enable --now kitsune-git-preview.service
+  systemctl enable --now kitsune-git.service
+  systemctl restart kitsune-git-preview.service
+  systemctl restart kitsune-git.service
+  systemctl is-active kitsune-git.service
+}
+
+require_linux
+case "$ACTION" in
+  install) install_release "$@" ;;
+  restart) systemctl restart kitsune-git-preview.service kitsune-git.service; systemctl is-active kitsune-git-preview.service; systemctl is-active kitsune-git.service ;;
+  status) systemctl is-active kitsune-git-preview.service 2>/dev/null || true; systemctl is-active kitsune-git.service 2>/dev/null || echo "not-installed" ;;
+  credentials)
+    [ -f "$ENV_FILE" ] || { echo "KitsuneGIT is not installed" >&2; exit 3; }
+    sed -n '/^KITSUNE_PUBLIC_URL=/p;/^KITSUNE_ADMIN_TOKEN=/p;/^KITSUNE_SSH_PORT=/p' "$ENV_FILE"
+    ;;
+  remove)
+    systemctl disable --now kitsune-git.service 2>/dev/null || true
+    systemctl disable --now kitsune-git-preview.service 2>/dev/null || true
+    rm -f -- "$SERVICE_FILE" "$PREVIEW_SERVICE_FILE"
+    if [ -f "$DOMAIN_FILE" ]; then
+      DOMAIN="$(cat "$DOMAIN_FILE")"
+      NGINX_CONFIG="/var/www/vhosts/system/$DOMAIN/conf/vhost_nginx.conf"
+      if [ -f "$NGINX_CONFIG" ] && grep -q '# kitsune-git-managed' "$NGINX_CONFIG"; then
+        rm -f -- "$NGINX_CONFIG"
+        plesk sbin httpdmng --reconfigure-domain "$DOMAIN" || true
+      fi
+      rm -f -- "$DOMAIN_FILE"
+    fi
+    rm -rf -- "$APP_ROOT" "$APP_ROOT.previous"
+    rm -f -- "$ENV_FILE"
+    systemctl daemon-reload
+    echo "Service removed; persistent repositories remain in $DATA_ROOT"
+    ;;
+  *) echo "Usage: kitsune-service {install URL SHA256 DOMAIN SSH_PORT|restart|status|credentials|remove}" >&2; exit 2 ;;
+esac

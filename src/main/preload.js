@@ -49,6 +49,22 @@ const api = Object.freeze({
   createPullRequest: (repository, input) => ipcRenderer.invoke('provider:createPullRequest', repository, input),
   openExternalUrl: (url) => ipcRenderer.invoke('shell:openExternalUrl', url),
 
+  // Self-hosted KitsuneGIT Web
+  kitsuneServerStatus: () => ipcRenderer.invoke('kitsune:status'),
+  connectKitsuneServer: (input) => ipcRenderer.invoke('kitsune:connect', input),
+  disconnectKitsuneServer: () => ipcRenderer.invoke('kitsune:disconnect'),
+  kitsuneProjects: () => ipcRenderer.invoke('kitsune:projects'),
+  searchKitsuneServer: (query) => ipcRenderer.invoke('kitsune:search', query),
+  kitsuneNotifications: () => ipcRenderer.invoke('kitsune:notifications'),
+  markKitsuneNotificationRead: (id) => ipcRenderer.invoke('kitsune:markNotificationRead', id),
+  kitsuneDrafts: () => ipcRenderer.invoke('kitsune:drafts'),
+  saveKitsuneDraft: (input) => ipcRenderer.invoke('kitsune:saveDraft', input),
+  removeKitsuneDraft: (id) => ipcRenderer.invoke('kitsune:removeDraft', id),
+  syncKitsuneDrafts: () => ipcRenderer.invoke('kitsune:syncDrafts'),
+  resolveKitsuneDraftConflict: (clientId, choice, serverDraft) => ipcRenderer.invoke('kitsune:resolveDraftConflict', clientId, choice, serverDraft),
+  publishKitsuneDraft: (clientId) => ipcRenderer.invoke('kitsune:publishDraft', clientId),
+  cloneKitsuneProject: (projectId, targetPath) => ipcRenderer.invoke('kitsune:cloneProject', projectId, targetPath),
+
   // Serialized Git operation queue
   operationQueueStatus: () => ipcRenderer.invoke('operations:getStatus'),
   cancelQueuedOperation: (id) => ipcRenderer.invoke('operations:cancel', id),

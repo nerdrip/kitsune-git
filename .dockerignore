@@ -1,0 +1,9 @@
+.git
+.github
+.kitsune-web
+build
+deploy
+dist
+docs
+node_modules
+test

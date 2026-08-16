@@ -1,0 +1,12 @@
+nav { flex-wrap: wrap; }
+.info-dialog { padding: 22px; }
+.info-dialog ul { padding-left: 20px; }
+.search-results { max-height: 60vh; overflow: auto; }
+.board { display: flex; gap: 10px; overflow: auto; }
+.board-list { min-width: 210px; background: #090b0f; border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.platform-panel { margin-top: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #0c0f14; }
+.platform-panel header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.change-graph { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.graph-node { padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; }
+.graph-node.ready { border-color: #3fb950; color: #7ee787; }
+@media (max-width: 650px) { header { height: auto; min-height: 68px; padding-block: 8px; } }

@@ -3424,7 +3424,7 @@
     if (!state.repoPath) return toast('Open a repository first', 'error');
     showLoading('Loading repository tools...');
     try {
-      const [worktrees, bisect, lfs, sparse, maintenance, providerStatus, providerRepository, profiles, overview] = await Promise.all([
+      const [worktrees, bisect, lfs, sparse, maintenance, providerStatus, providerRepository, profiles, overview, kitsuneStatus] = await Promise.all([
         window.api.worktrees(),
         window.api.bisectStatus(),
         window.api.lfsStatus(),
@@ -3433,7 +3433,8 @@
         window.api.providerStatus(),
         window.api.detectProviderRepository(),
         window.api.profiles(),
-        window.api.repositoryOverview()
+        window.api.repositoryOverview(),
+        window.api.kitsuneServerStatus()
       ]);
       const worktreeRows = worktrees.map((item, index) => `
         <div class="tool-list-row">
@@ -3552,6 +3553,14 @@
           </section>
 
           <section class="tool-card">
+            <h4>KitsuneGIT Web ${kitsuneStatus.configured ? '<span class="credential-badge success">connected</span>' : ''}</h4>
+            <p>${kitsuneStatus.configured ? `Connected to <code>${escapeHtml(kitsuneStatus.baseUrl)}</code>.` : 'Connect Desktop to your self-hosted workspace.'}</p>
+            <div class="runtime-actions">
+              <button id="tool-kitsune-server" class="btn btn-small">${kitsuneStatus.configured ? 'Projects & connection' : 'Connect server'}</button>
+            </div>
+          </section>
+
+          <section class="tool-card">
             <h4>Repository profiles <span class="credential-badge">${profiles.length}</span></h4>
             <p>Apply a reusable identity, Git runtime, SSH key, line-ending policy, and pull strategy to this repository.</p>
             <button id="tool-profiles" class="btn btn-small">Manage profiles</button>
@@ -3653,6 +3662,7 @@
       $('#tool-provider-accounts')?.addEventListener('click', showProviderAccountsDialog);
       $('#tool-provider-prs')?.addEventListener('click', () => showPullRequestsDialog(providerRepository));
       $('#tool-provider-create')?.addEventListener('click', () => showCreatePullRequestDialog(providerRepository));
+      $('#tool-kitsune-server')?.addEventListener('click', showKitsuneServerDialog);
       $('#tool-profiles')?.addEventListener('click', showProfilesDialog);
     } catch (error) {
       toast(`Unable to load repository tools: ${error.message}`, 'error');
@@ -3790,6 +3800,89 @@
         if (!confirm(`Remove the saved ${button.dataset.provider} token?`)) return;
         try { await window.api.removeProviderAccount(button.dataset.provider); await showProviderAccountsDialog(); }
         catch (error) { toast(error.message, 'error'); }
+      }));
+    } catch (error) { toast(error.message, 'error'); }
+  }
+
+  async function showKitsuneServerDialog() {
+    try {
+      const status = await window.api.kitsuneServerStatus();
+      const projects = status.configured ? await window.api.kitsuneProjects() : [];
+      const drafts = await window.api.kitsuneDrafts();
+      const rows = projects.map((project, index) => `
+        <div class="tool-list-row">
+          <div><strong>${escapeHtml(project.namespace)}/${escapeHtml(project.name)}</strong><span>${escapeHtml(project.description || project.visibility)}</span></div>
+          <div><button class="btn btn-small kitsune-draft-issue" data-index="${index}">Draft issue</button> <button class="btn btn-small kitsune-draft-mr" data-index="${index}">Draft MR</button> <button class="btn btn-small kitsune-draft-review" data-index="${index}">Draft review</button> <button class="btn btn-small kitsune-clone" data-index="${index}">Clone</button></div>
+        </div>`).join('');
+      const draftRows = drafts.filter(item => !item.deleted).map((item, index) => `<div class="tool-list-row"><div><strong>${escapeHtml(item.type)} draft</strong><span>${escapeHtml(item.payload?.title || item.payload?.body || item.clientId)} · v${item.version || 0}</span></div><div><button class="btn btn-small kitsune-publish-draft" data-index="${index}">Publish</button> <button class="btn btn-small btn-danger kitsune-remove-draft" data-index="${index}">Remove</button></div></div>`).join('');
+      showModal('KitsuneGIT Web', `
+        <div class="runtime-card ${status.configured ? 'runtime-ok' : status.encryptionAvailable ? '' : 'runtime-error'}">
+          ${status.configured ? `Connected securely to <strong>${escapeHtml(status.baseUrl)}</strong>.` : status.encryptionAvailable ? 'Connect this desktop to a KitsuneGIT Web instance.' : 'Secure OS encryption is unavailable, so server tokens cannot be stored.'}
+        </div>
+        ${status.configured ? `<div class="tool-list">${rows || '<div class="empty-inline">No projects on this instance</div>'}</div><h4>Encrypted offline drafts</h4><div class="tool-list">${draftRows || '<div class="empty-inline">No offline drafts</div>'}</div><div class="modal-actions"><button id="kitsune-sync-drafts" class="btn btn-small">Sync offline drafts</button><button id="kitsune-search" class="btn btn-small">Search server</button><button id="kitsune-notifications" class="btn btn-small">Notifications</button><button id="kitsune-disconnect" class="btn btn-small btn-danger">Disconnect</button></div>` : `
+          <div class="form-group"><label>Server URL</label><input id="kitsune-server-url" type="url" placeholder="https://git.example.com"></div>
+          <div class="form-group"><label>Administrator token</label><input id="kitsune-server-token" type="password" autocomplete="off"></div>
+          <button id="kitsune-connect" class="btn btn-primary btn-small" ${status.encryptionAvailable ? '' : 'disabled'}>Validate & connect</button>`}
+      `, []);
+      $('#modal').classList.add('modal-wide');
+      $('#kitsune-connect')?.addEventListener('click', async () => {
+        try {
+          showLoading('Connecting to KitsuneGIT Web...');
+          await window.api.connectKitsuneServer({ baseUrl: $('#kitsune-server-url').value.trim(), token: $('#kitsune-server-token').value });
+          toast('KitsuneGIT Web connected', 'success');
+          await showKitsuneServerDialog();
+        } catch (error) { toast(error.message, 'error'); } finally { hideLoading(); }
+      });
+      $('#kitsune-disconnect')?.addEventListener('click', async () => {
+        await window.api.disconnectKitsuneServer();
+        toast('KitsuneGIT Web disconnected', 'info');
+        await showKitsuneServerDialog();
+      });
+      $('#kitsune-search')?.addEventListener('click', async () => {
+        const query = window.prompt('Search projects, issues, merge requests and code');
+        if (!query) return;
+        try {
+          const result = await window.api.searchKitsuneServer(query);
+          const matches = [
+            ...result.projects.map(item => `<div class="tool-list-row"><div><strong>${escapeHtml(item.namespace)}/${escapeHtml(item.name)}</strong><span>project</span></div></div>`),
+            ...result.issues.map(item => `<div class="tool-list-row"><div><strong>#${item.iid} ${escapeHtml(item.title)}</strong><span>issue</span></div></div>`),
+            ...result.code.map(item => `<div class="tool-list-row"><div><strong>${escapeHtml(item.path)}:${item.line}</strong><span>${escapeHtml(item.preview)}</span></div></div>`)
+          ].join('');
+          showModal(`Search — ${escapeHtml(query)}`, `<div class="tool-list">${matches || '<div class="empty-inline">No matches</div>'}</div>`, []);
+          $('#modal').classList.add('modal-wide');
+        } catch (error) { toast(error.message, 'error'); }
+      });
+      $('#kitsune-notifications')?.addEventListener('click', async () => {
+        try {
+          const items = await window.api.kitsuneNotifications();
+          const content = items.map((item, index) => `<div class="tool-list-row"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.event)} · ${escapeHtml(new Date(item.createdAt).toLocaleString())}</span></div><button class="btn btn-small kitsune-read" data-index="${index}">Mark read</button></div>`).join('');
+          showModal('KitsuneGIT notifications', `<div class="tool-list">${content || '<div class="empty-inline">No unread notifications</div>'}</div>`, []);
+          $('#modal').classList.add('modal-wide');
+          $$('.kitsune-read').forEach(button => button.addEventListener('click', async () => { const item = items[Number(button.dataset.index)]; if (item) await window.api.markKitsuneNotificationRead(item.id); button.closest('.tool-list-row')?.remove(); }));
+        } catch (error) { toast(error.message, 'error'); }
+      });
+      $$('.kitsune-draft-issue').forEach(button => button.addEventListener('click', async () => {
+        const project = projects[Number(button.dataset.index)]; const title = window.prompt('Offline issue title'); if (!project || !title) return; const description = window.prompt('Description (optional)') || '';
+        try { await window.api.saveKitsuneDraft({ projectId: project.id, type: 'issue', payload: { title, description } }); toast('Encrypted offline draft saved', 'success'); } catch (error) { toast(error.message, 'error'); }
+      }));
+      $$('.kitsune-draft-mr').forEach(button => button.addEventListener('click', async () => { const project = projects[Number(button.dataset.index)]; const title = window.prompt('Offline merge request title'); const sourceBranch = window.prompt('Source branch'); const targetBranch = window.prompt('Target branch', project?.defaultBranch || 'main'); if (!project || !title || !sourceBranch || !targetBranch) return; try { await window.api.saveKitsuneDraft({ projectId: project.id, type: 'merge-request', payload: { title, description: '', sourceBranch, targetBranch } }); toast('Encrypted MR draft saved', 'success'); await showKitsuneServerDialog(); } catch (error) { toast(error.message, 'error'); } }));
+      $$('.kitsune-draft-review').forEach(button => button.addEventListener('click', async () => { const project = projects[Number(button.dataset.index)]; const mergeRequestIid = Number(window.prompt('Merge request number')); const filePath = window.prompt('File path'); const line = Number(window.prompt('Line number')); const body = window.prompt('Review comment'); if (!project || !Number.isSafeInteger(mergeRequestIid) || !filePath || !Number.isSafeInteger(line) || !body) return; try { await window.api.saveKitsuneDraft({ projectId: project.id, type: 'review', payload: { mergeRequestIid, filePath, line, side: 'new', body } }); toast('Encrypted review draft saved', 'success'); await showKitsuneServerDialog(); } catch (error) { toast(error.message, 'error'); } }));
+      $$('.kitsune-remove-draft').forEach(button => button.addEventListener('click', async () => { const draft = drafts.filter(item => !item.deleted)[Number(button.dataset.index)]; if (!draft || !confirm('Remove this local draft?')) return; await window.api.removeKitsuneDraft(draft.clientId); await showKitsuneServerDialog(); }));
+      $$('.kitsune-publish-draft').forEach(button => button.addEventListener('click', async () => { const draft = drafts.filter(item => !item.deleted)[Number(button.dataset.index)]; if (!draft || !confirm(`Publish this ${draft.type} draft?`)) return; try { await window.api.publishKitsuneDraft(draft.clientId); toast('Draft published', 'success'); await showKitsuneServerDialog(); } catch (error) { toast(error.message, 'error'); } }));
+      $('#kitsune-sync-drafts')?.addEventListener('click', async () => { try { const result = await window.api.syncKitsuneDrafts(); for (const conflict of result.conflicts) { const keepLocal = confirm(`Draft conflict for ${conflict.clientId}. OK keeps the local version; Cancel accepts the server version.`); await window.api.resolveKitsuneDraftConflict(conflict.clientId, keepLocal ? 'local' : 'server', conflict.server); } if (result.conflicts.length) await window.api.syncKitsuneDrafts(); toast(result.conflicts.length ? `${result.conflicts.length} draft conflict(s) resolved and synchronized` : 'Offline drafts synchronized', 'success'); await showKitsuneServerDialog(); } catch (error) { toast(`Drafts remain safely offline: ${error.message}`, 'error'); } });
+      $$('.kitsune-clone').forEach(button => button.addEventListener('click', async () => {
+        const project = projects[Number(button.dataset.index)];
+        const parent = await window.api.openDirectory();
+        if (!project || !parent) return;
+        const separator = parent.includes('\\') ? '\\' : '/';
+        const targetPath = `${parent.replace(/[\\/]$/, '')}${separator}${project.slug}`;
+        try {
+          showLoading(`Cloning ${project.namespace}/${project.name}...`);
+          await window.api.cloneKitsuneProject(project.id, targetPath);
+          hideModal();
+          await openRepoPath(targetPath, { notify: false });
+          toast('Project cloned from KitsuneGIT Web', 'success');
+        } catch (error) { toast(error.message, 'error'); } finally { hideLoading(); }
       }));
     } catch (error) { toast(error.message, 'error'); }
   }
