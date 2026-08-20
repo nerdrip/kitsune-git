@@ -28,7 +28,8 @@
 
 .kitsune-suite-bar *, .kitsune-suite-surface *, .kitsune-suite-bar *::before, .kitsune-suite-surface *::before, .kitsune-suite-bar *::after, .kitsune-suite-surface *::after { box-sizing: border-box; }
 .kitsune-suite-brand { align-items: center; display: flex; gap: 12px; min-width: 0; }
-.kitsune-suite-mark { align-items: center; background: linear-gradient(145deg, #ff806f, #f24f82); border-radius: 11px; box-shadow: 0 8px 20px rgba(240, 78, 125, .3); display: inline-flex; flex: 0 0 42px; font-size: 23px; height: 42px; justify-content: center; }
+.kitsune-suite-mark { align-items: center; background: linear-gradient(145deg, #ff806f, #f24f82); border-radius: 11px; box-shadow: 0 8px 20px rgba(240, 78, 125, .3); display: inline-flex; flex: 0 0 42px; font-size: 23px; height: 42px; justify-content: center; overflow: hidden; }
+.kitsune-suite-mark img { display: block; height: 38px; object-fit: contain; width: 38px; }
 .kitsune-suite-copy { min-width: 0; }
 .kitsune-suite-copy small { color: #96a8ff; display: block; font-size: 10px; font-weight: 750; letter-spacing: .13em; margin-bottom: 3px; text-transform: uppercase; }
 .kitsune-suite-copy strong { display: block; font-size: 17px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -63,9 +64,40 @@
 .kitsune-artifactory-shell .kitsune-log { background: #12162a; border-radius: 9px; color: #e4e8ff; display: block; max-height: 360px; overflow: auto; padding: 14px; white-space: pre-wrap; }
 .kitsune-git-shell hr { display: none; }
 
+.kitsune-self-update { color: var(--kitsune-suite-ink); display: grid; gap: 14px; margin: 0 auto 48px; max-width: 1080px; }
+.kitsune-self-update * { box-sizing: border-box; }
+.kitsune-self-update-hero { align-items: flex-start; background: linear-gradient(135deg, #fff 0%, #f1f4ff 100%); border: 1px solid var(--kitsune-suite-line); border-radius: 14px; display: flex; gap: 24px; justify-content: space-between; padding: 22px; }
+.kitsune-self-update-hero span, .kitsune-self-status small { color: var(--kitsune-suite-blue); display: block; font-size: 10px; font-weight: 800; letter-spacing: .13em; margin-bottom: 5px; }
+.kitsune-self-update-hero h1 { font-size: 24px; margin: 0 0 6px; }
+.kitsune-self-update-hero p { color: var(--kitsune-suite-muted); margin: 0; max-width: 760px; }
+.kitsune-self-card { background: #fff; border: 1px solid var(--kitsune-suite-line); border-radius: 14px; box-shadow: 0 8px 28px rgba(34, 46, 96, .07); padding: 20px; }
+.kitsune-self-status { align-items: center; display: flex; justify-content: space-between; }
+.kitsune-self-status div { display: flex; flex-direction: column; }
+.kitsune-self-status strong { font-size: 19px; }
+.kitsune-self-status span { color: var(--kitsune-suite-muted); font-size: 12px; }
+.kitsune-self-status i { background: #9ba4b7; border-radius: 50%; box-shadow: 0 0 0 6px #eef0f5; height: 12px; width: 12px; }
+.kitsune-self-status i.is-available { background: #ef9b2d; box-shadow: 0 0 0 6px #fff2dd; }
+.kitsune-self-status i:is(.is-current,.is-updated) { background: #1f9d75; box-shadow: 0 0 0 6px #dff5ed; }
+.kitsune-self-status i.is-failed { background: #cc4059; box-shadow: 0 0 0 6px #fbe3e8; }
+.kitsune-self-versions { display: grid; gap: 12px; grid-template-columns: repeat(2,minmax(0,1fr)); margin: 18px 0; }
+.kitsune-self-versions article { background: var(--kitsune-suite-soft); border: 1px solid var(--kitsune-suite-line); border-radius: 10px; padding: 15px; }
+.kitsune-self-versions article.has-update { background: #fff9ed; border-color: #efc985; }
+.kitsune-self-versions span, .kitsune-self-versions small { color: var(--kitsune-suite-muted); display: block; font-size: 11px; }
+.kitsune-self-versions span { font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.kitsune-self-versions strong { display: block; font-size: 19px; margin: 4px 0; }
+.kitsune-self-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 9px; }
+.kitsune-self-actions form { margin: 0; }
+.kitsune-self-button { align-items: center; background: #fff; border: 1px solid #cbd3e2; border-radius: 8px; color: #34415d !important; cursor: pointer; display: inline-flex; font: inherit; font-size: 13px; font-weight: 750; justify-content: center; min-height: 39px; padding: 8px 14px; text-decoration: none !important; }
+.kitsune-self-button.is-primary { background: var(--kitsune-suite-blue); border-color: var(--kitsune-suite-blue); color: #fff !important; }
+.kitsune-self-button:disabled { cursor: not-allowed; opacity: .45; }
+.kitsune-self-alert { background: #fff4f6; border: 1px solid #efc0ca; border-radius: 10px; color: #8d2d40; display: flex; flex-direction: column; padding: 13px 15px; }
+.kitsune-self-footnote { color: var(--kitsune-suite-muted); font-size: 12px; margin: 0 4px; }
+
 @media (max-width: 820px) {
   .kitsune-suite-bar { align-items: stretch; flex-direction: column; }
   .kitsune-suite-actions { justify-content: flex-start; }
   .kitsune-suite-link { flex: 1 1 auto; justify-content: center; }
   .kitsune-artifactory-shell .kitsune-grid { grid-template-columns: 1fr; }
+  .kitsune-self-update-hero { flex-direction: column; }
+  .kitsune-self-versions { grid-template-columns: 1fr; }
 }

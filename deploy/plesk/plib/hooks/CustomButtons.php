@@ -10,6 +10,7 @@ class Modules_KitsuneGit_CustomButtons extends pm_Hook_CustomButtons
             'section' => 'toolsAndResourcesButtons',
             'title' => 'KitsuneGIT Web',
             'description' => 'Deploy and manage your Git collaboration server.',
+            'icon' => pm_Context::getBaseUrl() . 'images/kitsune-git-menu.svg',
             'link' => pm_Context::getActionUrl('index', 'index'),
         ]];
     }
