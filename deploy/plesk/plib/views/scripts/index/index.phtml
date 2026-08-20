@@ -31,7 +31,8 @@ $configured = $config['domain'] !== '';
 
   <nav class="kgt-tabs" aria-label="Sekcje managera KitsuneGIT">
     <?php foreach (['status' => ['●', 'Stan'], 'deploy' => ['↻', 'Wdrożenie'], 'config' => ['⚙', 'Repozytorium i domena'], 'access' => ['⌘', 'Klucze i dostęp'], 'diagnostics' => ['≡', 'Diagnostyka']] as $tab => $definition): ?>
-      <a class="kgt-tab<?php echo $activeTab === $tab ? ' is-active' : ''; ?>" href="?tab=<?php echo $e($tab); ?>"><span><?php echo $e($definition[0]); ?></span><?php echo $e($definition[1]); ?></a>
+      <?php $tabUrl = pm_Context::getBaseUrl() . 'index.php/index/index?tab=' . rawurlencode($tab); ?>
+      <a class="kgt-tab<?php echo $activeTab === $tab ? ' is-active' : ''; ?>" href="<?php echo $e($tabUrl); ?>"<?php echo $activeTab === $tab ? ' aria-current="page"' : ''; ?>><span><?php echo $e($definition[0]); ?></span><?php echo $e($definition[1]); ?></a>
     <?php endforeach; ?>
   </nav>
 
