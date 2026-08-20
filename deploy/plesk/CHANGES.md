@@ -1,3 +1,7 @@
+# 1.4.0-5
+
+* Fixed section navigation by linking every tab to the explicit Plesk extension controller route.
+
 # 1.4.0-4
 
 * Raised the minimum Node.js version to 22.13 so the built-in SQLite backend is available without experimental flags.
