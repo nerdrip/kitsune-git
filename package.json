@@ -1,6 +1,6 @@
 {
   "name": "kitsune-git",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Sovereign Git forge and fast cross-platform desktop client",
   "main": "src/main/main.js",
