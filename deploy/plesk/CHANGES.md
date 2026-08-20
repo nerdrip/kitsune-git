@@ -1,3 +1,7 @@
+# 1.4.0-2
+
+* Fixed process execution on Plesk hosts whose system PHP is older than 7.4 while retaining shell-safe argument escaping.
+
 # 1.4.0-1
 
 * Rebuilt the extension as a complete Plesk deployment manager with clear status, deployment, repository/domain, access, and diagnostics sections.
