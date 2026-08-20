@@ -5,7 +5,7 @@
   <description>Deploy and manage a self-hosted KitsuneGIT collaboration server.</description>
   <category>tools</category>
   <version>1.4.0</version>
-  <release>2</release>
+  <release>3</release>
   <vendor>KitsuneGIT Team</vendor>
   <url>https://github.com/nerdrip/kitsune-git</url>
   <help_url>https://github.com/nerdrip/kitsune-git/tree/main/docs</help_url>

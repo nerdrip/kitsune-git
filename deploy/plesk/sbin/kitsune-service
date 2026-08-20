@@ -1,6 +1,8 @@
 #!/usr/bin/env php
 <?php
 
+// Keep this executable LF-only so Linux resolves the shebang as "php", not "php\r".
+
 final class KitsuneGitPleskManager
 {
     private const MANAGER_ROOT = '/var/lib/kitsune-git-manager';
