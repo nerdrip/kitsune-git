@@ -1,3 +1,8 @@
+# 1.3.0-2
+
+* Added the shared Kitsune Plesk Suite shell and direct central-management navigation.
+* Keeps a standalone Plesk menu entry only when Kitsune Hub is unavailable.
+
 # 1.3.0
 
 * Added signed Git-native collaboration refs, Forge Mesh, Change Intelligence, portable change bundles, policy evidence, and Attention Engine.

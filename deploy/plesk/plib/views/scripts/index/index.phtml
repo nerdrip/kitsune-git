@@ -1,4 +1,6 @@
-<h2>KitsuneGIT Web</h2>
+<div data-kitsune-suite data-suite-product="<?php echo $this->escape((string) $this->suiteProduct); ?>" data-suite-version="<?php echo $this->escape((string) $this->suiteVersion); ?>" data-suite-hub="<?php echo $this->suiteHubActive ? '1' : '0'; ?>"></div>
+<main class="kitsune-git-shell">
+<header class="kitsune-git-hero"><span>KITSUNEGIT · PLESK · MANAGER</span><h2>KitsuneGIT Web</h2><p>Instalacja, stan usługi i bezpieczna konfiguracja wydania w jednym miejscu.</p></header>
 <p>Service status: <strong><?php echo $this->escape($this->serviceStatus); ?></strong></p>
 <?php if ($this->publicUrl): ?>
   <p><a class="btn action" href="<?php echo $this->escape($this->publicUrl); ?>" target="_blank" rel="noopener">Open KitsuneGIT Web</a></p>
@@ -13,3 +15,4 @@
 <hr>
 <h3>Install or upgrade</h3>
 <?php echo $this->form; ?>
+</main>
