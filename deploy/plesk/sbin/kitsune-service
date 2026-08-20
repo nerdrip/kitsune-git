@@ -1,193 +1,569 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env php
+<?php
 
-ACTION="${1:-status}"
-APP_ROOT="/opt/kitsune-git"
-DATA_ROOT="/var/lib/kitsune-git"
-ENV_FILE="/etc/kitsune-git.env"
-SERVICE_FILE="/etc/systemd/system/kitsune-git.service"
-PREVIEW_SERVICE_FILE="/etc/systemd/system/kitsune-git-preview.service"
-DOMAIN_FILE="/etc/kitsune-git-domain"
+final class KitsuneGitPleskManager
+{
+    private const MANAGER_ROOT = '/var/lib/kitsune-git-manager';
+    private const ENV_FILE = '/etc/kitsune-git.env';
+    private const SERVICE_FILE = '/etc/systemd/system/kitsune-git.service';
+    private const PREVIEW_SERVICE_FILE = '/etc/systemd/system/kitsune-git-preview.service';
+    private const LEGACY_DOMAIN_FILE = '/etc/kitsune-git-domain';
 
-require_linux() {
-  [ "$(uname -s)" = "Linux" ] || { echo "Linux is required" >&2; exit 2; }
-  command -v systemctl >/dev/null 2>&1 || { echo "systemd is required" >&2; exit 2; }
-}
+    private $config = [];
+    private $state = [];
+    private $statePath = '';
+    private $stateOwner = null;
+    private $stateGroup = null;
+    private $temporaryPaths = [];
 
-install_release() {
-  RELEASE_URL="${2:-}"
-  EXPECTED_SHA="${3:-}"
-  DOMAIN="${4:-}"
-  SSH_PORT="${5:-2222}"
-  echo "$RELEASE_URL" | grep -Eq '^https://[^[:space:]]+$' || { echo "Release URL must use HTTPS" >&2; exit 2; }
-  echo "$EXPECTED_SHA" | grep -Eq '^[a-f0-9]{64}$' || { echo "Invalid SHA-256" >&2; exit 2; }
-  echo "$DOMAIN" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]{0,251}\.[A-Za-z]{2,63}$' || { echo "Invalid Plesk domain" >&2; exit 2; }
-  echo "$SSH_PORT" | grep -Eq '^[0-9]+$' && [ "$SSH_PORT" -ge 1024 ] && [ "$SSH_PORT" -le 65535 ] || { echo "Invalid SSH port" >&2; exit 2; }
-  VHOST_ROOT="/var/www/vhosts/system/$DOMAIN/conf"
-  [ -d "$VHOST_ROOT" ] || { echo "Plesk domain does not exist: $DOMAIN" >&2; exit 2; }
-  NGINX_CONFIG="$VHOST_ROOT/vhost_nginx.conf"
-  if [ -s "$NGINX_CONFIG" ] && ! grep -q '# kitsune-git-managed' "$NGINX_CONFIG"; then
-    echo "The domain already has custom nginx directives; use a dedicated empty domain" >&2
-    exit 4
-  fi
-  if [ -f "$DOMAIN_FILE" ]; then
-    OLD_DOMAIN="$(cat "$DOMAIN_FILE")"
-    OLD_CONFIG="/var/www/vhosts/system/$OLD_DOMAIN/conf/vhost_nginx.conf"
-    if [ "$OLD_DOMAIN" != "$DOMAIN" ] && [ -f "$OLD_CONFIG" ] && grep -q '# kitsune-git-managed' "$OLD_CONFIG"; then
-      rm -f -- "$OLD_CONFIG"
-      plesk sbin httpdmng --reconfigure-domain "$OLD_DOMAIN" || true
-    fi
-  fi
-  command -v node >/dev/null 2>&1 || { echo "Node.js 22+ is required" >&2; exit 2; }
-  command -v npm >/dev/null 2>&1 || { echo "npm is required" >&2; exit 2; }
-  command -v git >/dev/null 2>&1 || { echo "Git is required" >&2; exit 2; }
-  NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-  [ "$NODE_MAJOR" -ge 22 ] || { echo "Node.js 22+ is required" >&2; exit 2; }
-
-  TMP_ROOT="$(mktemp -d /tmp/kitsune-git.XXXXXX)"
-  trap 'rm -rf -- "$TMP_ROOT"' EXIT INT TERM
-  curl --fail --location --proto '=https' --tlsv1.2 "$RELEASE_URL" --output "$TMP_ROOT/release.tar.gz"
-  ACTUAL_SHA="$(sha256sum "$TMP_ROOT/release.tar.gz" | awk '{print $1}')"
-  [ "$ACTUAL_SHA" = "$EXPECTED_SHA" ] || { echo "Release checksum mismatch" >&2; exit 3; }
-  mkdir "$TMP_ROOT/source"
-  tar -xzf "$TMP_ROOT/release.tar.gz" -C "$TMP_ROOT/source" --strip-components=1
-  [ -f "$TMP_ROOT/source/package.json" ] && [ -f "$TMP_ROOT/source/src/server/cli.js" ] || { echo "Invalid KitsuneGIT release" >&2; exit 3; }
-  (cd "$TMP_ROOT/source" && npm ci --omit=dev --ignore-scripts)
-
-  mkdir -p "$DATA_ROOT"
-  chmod 750 "$DATA_ROOT"
-  if [ ! -f "$ENV_FILE" ]; then
-    ADMIN_TOKEN="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
-    SECRET_KEY="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
-    PREVIEW_SECRET="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
-    umask 077
+    public function execute(array $arguments)
     {
-      echo "KITSUNE_HOST=127.0.0.1"
-      echo "KITSUNE_PORT=4780"
-      echo "KITSUNE_SSH_HOST=0.0.0.0"
-      echo "KITSUNE_SSH_PORT=$SSH_PORT"
-      echo "KITSUNE_METADATA_BACKEND=sqlite"
-      echo "KITSUNE_DATA_PATH=$DATA_ROOT"
-      echo "KITSUNE_ADMIN_TOKEN=$ADMIN_TOKEN"
-      echo "KITSUNE_SECRET_KEY=$SECRET_KEY"
-      echo "KITSUNE_LFS_MAX_OBJECT_BYTES=10737418240"
-      echo "KITSUNE_PUBLIC_URL=https://$DOMAIN"
-      echo "KITSUNE_PLESK_DOMAIN=$DOMAIN"
-      echo "KITSUNE_PREVIEW_HELPER_PORT=4781"
-      echo "KITSUNE_PREVIEW_PROVISIONER_URL=http://127.0.0.1:4781/"
-      echo "KITSUNE_PREVIEW_SECRET=$PREVIEW_SECRET"
-    } > "$ENV_FILE"
-  else
-    sed -i "s|^KITSUNE_PUBLIC_URL=.*$|KITSUNE_PUBLIC_URL=https://$DOMAIN|" "$ENV_FILE"
-    if grep -q '^KITSUNE_PLESK_DOMAIN=' "$ENV_FILE"; then sed -i "s|^KITSUNE_PLESK_DOMAIN=.*$|KITSUNE_PLESK_DOMAIN=$DOMAIN|" "$ENV_FILE"; else printf '%s\n' "KITSUNE_PLESK_DOMAIN=$DOMAIN" >> "$ENV_FILE"; fi
-    grep -q '^KITSUNE_PREVIEW_HELPER_PORT=' "$ENV_FILE" || printf '%s\n' "KITSUNE_PREVIEW_HELPER_PORT=4781" >> "$ENV_FILE"
-    grep -q '^KITSUNE_PREVIEW_PROVISIONER_URL=' "$ENV_FILE" || printf '%s\n' "KITSUNE_PREVIEW_PROVISIONER_URL=http://127.0.0.1:4781/" >> "$ENV_FILE"
-    if ! grep -q '^KITSUNE_PREVIEW_SECRET=' "$ENV_FILE"; then PREVIEW_SECRET="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"; printf '%s\n' "KITSUNE_PREVIEW_SECRET=$PREVIEW_SECRET" >> "$ENV_FILE"; fi
-    if grep -q '^KITSUNE_SSH_PORT=' "$ENV_FILE"; then sed -i "s|^KITSUNE_SSH_PORT=.*$|KITSUNE_SSH_PORT=$SSH_PORT|" "$ENV_FILE"; else printf '%s\n' "KITSUNE_SSH_HOST=0.0.0.0" "KITSUNE_SSH_PORT=$SSH_PORT" >> "$ENV_FILE"; fi
-  fi
-  chmod 600 "$ENV_FILE"
+        if (($arguments[1] ?? '') === 'remove') {
+            $this->removeInstallation();
+            echo "Usługi i kod KitsuneGIT usunięto; dane trwałe pozostawiono.\n";
+            return;
+        }
+        if (($arguments[1] ?? '') === 'migrate-vhost') {
+            foreach (array_slice($arguments, 2) as $domain) $this->removeLegacyVhost((string) $domain);
+            echo "Usunięto starszą, bezpośrednią konfigurację vhost, jeżeli była obecna.\n";
+            return;
+        }
+        if (($arguments[1] ?? '') !== '--config' || empty($arguments[2])) {
+            throw new RuntimeException('Użycie: kitsune-service --config PLIK | migrate-vhost DOMENA... | remove');
+        }
 
-  rm -rf -- "$APP_ROOT.previous"
-  if [ -d "$APP_ROOT" ]; then mv -- "$APP_ROOT" "$APP_ROOT.previous"; fi
-  mv -- "$TMP_ROOT/source" "$APP_ROOT"
-  cat > "$SERVICE_FILE" <<EOF
-[Unit]
-Description=KitsuneGIT Web
-After=network-online.target
-Wants=network-online.target
+        $runtime = (string) $arguments[2];
+        if (!is_file($runtime) || is_link($runtime)) throw new RuntimeException('Nieprawidłowy plik konfiguracji operacji.');
+        $this->stateOwner = fileowner($runtime);
+        $this->stateGroup = filegroup($runtime);
+        $decoded = json_decode((string) file_get_contents($runtime), true);
+        if (!is_array($decoded)) throw new RuntimeException('Konfiguracja operacji nie jest poprawnym JSON-em.');
+        $this->config = $this->validateConfig($decoded);
+        $this->statePath = rtrim($this->config['extensionVarDir'], '/') . '/state.json';
+        $this->state = $this->readState();
+        $operation = $this->config['operation'];
 
-[Service]
-Type=simple
-User=psaadm
-Group=psaadm
-EnvironmentFile=$ENV_FILE
-WorkingDirectory=$APP_ROOT
-ExecStart=/usr/bin/env node $APP_ROOT/src/server/cli.js
-Restart=on-failure
-RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$DATA_ROOT
+        try {
+            if ($operation === 'status') {
+                $result = $this->collectStatus(true);
+                echo json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+                return;
+            }
+            $this->state['lastOperation'] = $operation;
+            $this->state['lastError'] = null;
+            $this->log('Rozpoczęto operację: ' . $operation . '.');
+            if ($operation === 'check') $result = $this->checkRepository();
+            elseif ($operation === 'deploy') $result = $this->deploy();
+            elseif ($operation === 'restart') $result = $this->restartServices();
+            elseif ($operation === 'generate-key') $result = $this->generateDeployKey(true);
+            elseif ($operation === 'rotate-admin-token') $result = $this->rotateAdminToken();
+            else throw new RuntimeException('Nieobsługiwana operacja.');
+            $this->state['lastSuccess'] = gmdate('c');
+            $this->state['lastError'] = null;
+            $this->log('Operacja zakończona poprawnie: ' . $operation . '.');
+            $this->saveState();
+            echo json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+        } catch (Throwable $exception) {
+            $this->state['lastError'] = $this->safeMessage($exception->getMessage());
+            $this->log('Błąd: ' . $this->state['lastError']);
+            $this->saveState();
+            throw $exception;
+        } finally {
+            foreach (array_reverse($this->temporaryPaths) as $path) $this->removeTree($path, true);
+        }
+    }
 
-[Install]
-WantedBy=multi-user.target
-EOF
-  cat > "$PREVIEW_SERVICE_FILE" <<EOF
-[Unit]
-Description=KitsuneGIT Plesk Preview Provisioner
-After=network.target
+    private function validateConfig(array $input)
+    {
+        $required = ['operation', 'repositoryUrl', 'repositoryBranch', 'gitAuthMode', 'domain', 'appRoot', 'dataRoot', 'appPort', 'sshPort', 'serviceUser', 'extensionVarDir'];
+        foreach ($required as $field) if (!isset($input[$field])) throw new RuntimeException('Brak ustawienia: ' . $field . '.');
+        if (!in_array($input['operation'], ['status', 'check', 'deploy', 'restart', 'generate-key', 'rotate-admin-token'], true)) throw new RuntimeException('Nieprawidłowa operacja.');
+        if (!preg_match('/^[A-Za-z0-9._\/-]{1,255}$/', (string) $input['repositoryBranch']) || strpos((string) $input['repositoryBranch'], '..') !== false) throw new RuntimeException('Nieprawidłowa gałąź Git.');
+        if (!preg_match('#^(?:https://[^\s]+|git@[A-Za-z0-9.-]+:[^\s]+|ssh://git@[A-Za-z0-9.-]+(?::[0-9]+)?/[^\s]+)$#i', (string) $input['repositoryUrl'])) throw new RuntimeException('Nieprawidłowy adres repozytorium.');
+        if (!in_array($input['gitAuthMode'], ['public', 'token', 'generated-key', 'custom-key'], true)) throw new RuntimeException('Nieprawidłowy tryb uwierzytelnienia Git.');
+        if ((string) $input['domain'] !== '' && !preg_match('/^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])$/', (string) $input['domain'])) throw new RuntimeException('Nieprawidłowa domena publikacji.');
+        foreach (['appRoot', 'dataRoot'] as $field) {
+            $input[$field] = rtrim((string) $input[$field], '/');
+            if (!preg_match('#^/(?:home|opt|srv|var/lib)/[A-Za-z0-9._/-]+$#', $input[$field]) || in_array('..', explode('/', $input[$field]), true)) throw new RuntimeException('Niebezpieczna ścieżka ' . $field . '.');
+        }
+        $input['extensionVarDir'] = rtrim((string) $input['extensionVarDir'], '/');
+        if (!is_dir($input['extensionVarDir']) || realpath($input['extensionVarDir']) !== $input['extensionVarDir']) throw new RuntimeException('Nieprawidłowy katalog stanu rozszerzenia.');
+        foreach (['appPort', 'sshPort'] as $field) {
+            $input[$field] = (int) $input[$field];
+            $maximum = $field === 'appPort' ? 65534 : 65535;
+            if ($input[$field] < 1024 || $input[$field] > $maximum) throw new RuntimeException('Nieprawidłowy port ' . $field . '.');
+        }
+        if ($input['appPort'] === $input['sshPort']) throw new RuntimeException('Port HTTP i SSH muszą być różne.');
+        if (!preg_match('/^[a-z_][a-z0-9_-]{0,31}$/', (string) $input['serviceUser'])) throw new RuntimeException('Nieprawidłowy użytkownik usługi.');
+        $input['gitToken'] = (string) ($input['gitToken'] ?? '');
+        $input['gitSshPrivateKey'] = (string) ($input['gitSshPrivateKey'] ?? '');
+        $input['gitSshKnownHosts'] = trim((string) ($input['gitSshKnownHosts'] ?? ''));
+        $input['gitUsername'] = trim((string) ($input['gitUsername'] ?? 'x-access-token'));
+        $input['lfsMaxObjectBytes'] = max(1048576, (int) ($input['lfsMaxObjectBytes'] ?? 10737418240));
+        return $input;
+    }
 
-[Service]
-Type=simple
-User=root
-Group=root
-EnvironmentFile=$ENV_FILE
-WorkingDirectory=$APP_ROOT
-ExecStart=/usr/bin/env node $APP_ROOT/src/server/plesk-preview-helper.js
-Restart=on-failure
-RestartSec=5
-PrivateTmp=true
-ProtectHome=true
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+    private function checkRepository()
+    {
+        $this->assertPrerequisites(true);
+        [$environment, $cleanup] = $this->gitEnvironment();
+        try {
+            $remote = $this->remoteCommit($environment);
+            $local = $this->localCommit();
+            $this->state['repository'] = [
+                'branch' => $this->config['repositoryBranch'],
+                'localCommit' => $local,
+                'remoteCommit' => $remote,
+                'checkedAt' => gmdate('c'),
+                'updateAvailable' => $local !== $remote,
+            ];
+            $this->log('Origin: ' . substr($remote, 0, 12) . ($local ? '; lokalnie: ' . substr($local, 0, 12) . '.' : '; aplikacja nie została jeszcze pobrana.'));
+            return $this->state['repository'];
+        } finally {
+            $cleanup();
+        }
+    }
 
-[Install]
-WantedBy=multi-user.target
-EOF
-  chown -R psaadm:psaadm "$DATA_ROOT"
-  cat > "$NGINX_CONFIG" <<EOF
-# kitsune-git-managed
-location ~ ^/(?!.well-known/acme-challenge).*$ {
-    proxy_pass http://127.0.0.1:4780;
-    proxy_http_version 1.1;
-    proxy_request_buffering off;
-    proxy_buffering off;
-    proxy_read_timeout 3600s;
-    client_max_body_size 0;
-    proxy_set_header Host \$host;
-    proxy_set_header X-Real-IP \$remote_addr;
-    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$scheme;
+    private function deploy()
+    {
+        $this->assertPrerequisites(true);
+        if (!is_dir('/var/www/vhosts/system/' . $this->config['domain'] . '/conf')) throw new RuntimeException('Wybrana domena nie ma aktywnego vhosta Pleska.');
+        [$environment, $cleanup] = $this->gitEnvironment();
+        $appRoot = $this->config['appRoot'];
+        $parent = dirname($appRoot);
+        $staging = $parent . '/.kitsune-git-stage-' . bin2hex(random_bytes(8));
+        $previous = $appRoot . '.previous';
+        $oldEnvironment = is_file(self::ENV_FILE) ? (string) file_get_contents(self::ENV_FILE) : null;
+        $switched = false;
+        try {
+            if (!is_dir($parent) && !mkdir($parent, 0755, true) && !is_dir($parent)) throw new RuntimeException('Nie można utworzyć katalogu wdrożenia.');
+            $this->temporaryPaths[] = $staging;
+            $remote = $this->remoteCommit($environment);
+            $this->run(['git', 'clone', '--depth', '1', '--single-branch', '--branch', $this->config['repositoryBranch'], '--', $this->config['repositoryUrl'], $staging], $environment);
+            $local = trim($this->run(['git', '-C', $staging, 'rev-parse', 'HEAD'], $environment)['stdout']);
+            if ($local !== $remote || !preg_match('/^[a-f0-9]{40}$/', $local)) throw new RuntimeException('Pobrany commit nie zgadza się z origin.');
+            if (!is_file($staging . '/package.json') || !is_file($staging . '/src/server/cli.js') || !is_file($staging . '/src/server/plesk-preview-helper.js')) throw new RuntimeException('Repozytorium nie zawiera kompletnej platformy KitsuneGIT Web.');
+            $package = json_decode((string) file_get_contents($staging . '/package.json'), true);
+            if (!is_array($package) || ($package['name'] ?? '') !== 'kitsune-git') throw new RuntimeException('Repozytorium nie jest projektem kitsune-git.');
+            $this->run(['npm', 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], [], $staging);
+
+            $this->preparePersistentData();
+            $this->writeEnvironment();
+            $this->writeServices();
+            if (is_dir($previous)) $this->removeTree($previous);
+            if (is_dir($appRoot)) {
+                if (!rename($appRoot, $previous)) throw new RuntimeException('Nie można odsunąć poprzedniego wdrożenia.');
+            }
+            if (!rename($staging, $appRoot)) throw new RuntimeException('Nie można aktywować pobranego wdrożenia.');
+            $switched = true;
+            $this->temporaryPaths = array_values(array_diff($this->temporaryPaths, [$staging]));
+            $this->run(['systemctl', 'daemon-reload']);
+            $this->run(['systemctl', 'enable', '--now', 'kitsune-git-preview.service']);
+            $this->run(['systemctl', 'enable', '--now', 'kitsune-git.service']);
+            $this->run(['systemctl', 'restart', 'kitsune-git-preview.service', 'kitsune-git.service']);
+            $this->waitForReadiness();
+
+            $this->state['repository'] = ['branch' => $this->config['repositoryBranch'], 'localCommit' => $local, 'remoteCommit' => $remote, 'checkedAt' => gmdate('c'), 'updateAvailable' => false];
+            $this->state['deployment'] = ['commit' => $local, 'version' => (string) ($package['version'] ?? 'unknown'), 'deployedAt' => gmdate('c'), 'domain' => $this->config['domain']];
+            $this->collectStatus(false);
+            $this->log('Wdrożono KitsuneGIT ' . ($package['version'] ?? 'unknown') . ' (' . substr($local, 0, 12) . ') pod https://' . $this->config['domain'] . '.');
+            return $this->state['deployment'];
+        } catch (Throwable $exception) {
+            if ($switched && is_dir($previous)) {
+                $failed = $appRoot . '.failed-' . gmdate('YmdHis');
+                if (is_dir($appRoot)) @rename($appRoot, $failed);
+                @rename($previous, $appRoot);
+                if ($oldEnvironment === null) @unlink(self::ENV_FILE); else $this->writeSecureFile(self::ENV_FILE, $oldEnvironment, 0600);
+                try { $this->run(['systemctl', 'daemon-reload'], [], null, true); $this->run(['systemctl', 'restart', 'kitsune-git-preview.service', 'kitsune-git.service'], [], null, true); } catch (Throwable $ignored) {}
+                $this->log('Przywrócono poprzednie wdrożenie po nieudanym healthchecku.');
+            }
+            throw $exception;
+        } finally {
+            $cleanup();
+        }
+    }
+
+    private function restartServices()
+    {
+        if (!is_file(self::SERVICE_FILE)) throw new RuntimeException('KitsuneGIT nie jest jeszcze wdrożony.');
+        $this->run(['systemctl', 'restart', 'kitsune-git-preview.service', 'kitsune-git.service']);
+        $this->waitForReadiness();
+        return $this->collectStatus(false);
+    }
+
+    private function rotateAdminToken()
+    {
+        if (!is_file(self::ENV_FILE)) throw new RuntimeException('KitsuneGIT nie jest jeszcze wdrożony.');
+        $values = $this->readEnvironment();
+        $values['KITSUNE_ADMIN_TOKEN'] = bin2hex(random_bytes(32));
+        $this->writeEnvironmentValues($values);
+        $this->run(['systemctl', 'restart', 'kitsune-git.service']);
+        $this->waitForReadiness();
+        $this->log('Token administratora został obrócony; poprzedni token przestał działać.');
+        return ['rotated' => true];
+    }
+
+    private function generateDeployKey($rotate)
+    {
+        $this->assertPrerequisites(false);
+        $this->ensureDirectory(self::MANAGER_ROOT, 0700);
+        $private = self::MANAGER_ROOT . '/deploy_ed25519';
+        if ($rotate && is_file($private)) {
+            @rename($private, $private . '.previous');
+            if (is_file($private . '.pub')) @rename($private . '.pub', $private . '.pub.previous');
+        }
+        if (!is_file($private)) $this->run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-C', 'kitsune-git-plesk-deploy', '-f', $private]);
+        @chmod($private, 0600);
+        @chmod($private . '.pub', 0644);
+        $public = trim((string) file_get_contents($private . '.pub'));
+        $fingerprint = trim($this->run(['ssh-keygen', '-lf', $private . '.pub'])['stdout']);
+        $this->state['deployKey'] = ['publicKey' => $public, 'fingerprint' => $fingerprint, 'createdAt' => gmdate('c')];
+        $this->log(($rotate ? 'Wygenerowano nowy' : 'Sprawdzono') . ' deployment key: ' . $fingerprint . '.');
+        return $this->state['deployKey'];
+    }
+
+    private function gitEnvironment()
+    {
+        $mode = $this->config['gitAuthMode'];
+        $environment = ['GIT_TERMINAL_PROMPT' => '0'];
+        $directory = sys_get_temp_dir() . '/kitsune-git-auth-' . bin2hex(random_bytes(8));
+        $this->ensureDirectory($directory, 0700);
+        $this->temporaryPaths[] = $directory;
+        if ($mode === 'token') {
+            if ($this->config['gitToken'] === '') throw new RuntimeException('Brak zapisanego tokenu Git HTTPS.');
+            $askpass = $directory . '/askpass';
+            $this->writeSecureFile($askpass, "#!/bin/sh\ncase \"\$1\" in *Username*) printf '%s\\n' \"\$KITSUNE_GIT_USERNAME\" ;; *) printf '%s\\n' \"\$KITSUNE_GIT_TOKEN\" ;; esac\n", 0700);
+            $environment['GIT_ASKPASS'] = $askpass;
+            $environment['KITSUNE_GIT_USERNAME'] = $this->config['gitUsername'];
+            $environment['KITSUNE_GIT_TOKEN'] = $this->config['gitToken'];
+        } elseif ($mode === 'generated-key' || $mode === 'custom-key') {
+            if ($mode === 'generated-key') {
+                $key = self::MANAGER_ROOT . '/deploy_ed25519';
+                if (!is_file($key)) $this->generateDeployKey(false);
+            } else {
+                if ($this->config['gitSshPrivateKey'] === '') throw new RuntimeException('Brak zapisanego prywatnego klucza SSH.');
+                $key = $directory . '/deploy_key';
+                $this->writeSecureFile($key, rtrim($this->config['gitSshPrivateKey']) . "\n", 0600);
+            }
+            $knownHosts = $this->knownHostsFile($directory);
+            $environment['GIT_SSH_COMMAND'] = '/usr/bin/env ssh -i ' . escapeshellarg($key) . ' -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=' . escapeshellarg($knownHosts);
+        }
+        $cleanup = function () use ($directory) {
+            $this->removeTree($directory, true);
+            $this->temporaryPaths = array_values(array_diff($this->temporaryPaths, [$directory]));
+        };
+        return [$environment, $cleanup];
+    }
+
+    private function knownHostsFile($temporaryDirectory)
+    {
+        if ($this->config['gitSshKnownHosts'] !== '') {
+            $path = $temporaryDirectory . '/known_hosts';
+            $this->writeSecureFile($path, rtrim($this->config['gitSshKnownHosts']) . "\n", 0600);
+            $this->state['runtime']['knownHostsSource'] = 'pinned-by-admin';
+            return $path;
+        }
+        [$host, $port] = $this->repositorySshTarget();
+        $path = self::MANAGER_ROOT . '/known_hosts';
+        $existing = is_file($path) ? (string) file_get_contents($path) : '';
+        $needle = $port === 22 ? $host : '[' . $host . ']:' . $port;
+        if (strpos($existing, $needle . ' ') === false) {
+            $scan = $this->run(['ssh-keyscan', '-T', '8', '-p', (string) $port, $host]);
+            $lines = array_values(array_filter(preg_split('/\r?\n/', $scan['stdout']), function ($line) { return $line !== '' && strpos($line, '#') !== 0; }));
+            if (!$lines) throw new RuntimeException('ssh-keyscan nie zwrócił klucza hosta ' . $host . '.');
+            $existing = rtrim($existing) . ($existing !== '' ? "\n" : '') . implode("\n", $lines) . "\n";
+            $this->writeSecureFile($path, $existing, 0600);
+        }
+        $this->state['runtime']['knownHostsSource'] = 'automatic-trust-on-first-use';
+        return $path;
+    }
+
+    private function repositorySshTarget()
+    {
+        $url = $this->config['repositoryUrl'];
+        if (preg_match('/^git@([A-Za-z0-9.-]+):/', $url, $matches)) return [$matches[1], 22];
+        $parts = parse_url($url);
+        $host = is_array($parts) ? (string) ($parts['host'] ?? '') : '';
+        $port = is_array($parts) ? (int) ($parts['port'] ?? 22) : 22;
+        if (!preg_match('/^[A-Za-z0-9.-]+$/', $host) || $port < 1 || $port > 65535) throw new RuntimeException('Nie można odczytać hosta SSH repozytorium.');
+        return [$host, $port];
+    }
+
+    private function remoteCommit(array $environment)
+    {
+        $reference = 'refs/heads/' . $this->config['repositoryBranch'];
+        $result = $this->run(['git', 'ls-remote', '--exit-code', '--heads', '--', $this->config['repositoryUrl'], $reference], $environment);
+        if (!preg_match('/^([a-f0-9]{40})\s+/m', $result['stdout'], $matches)) throw new RuntimeException('Repozytorium nie zawiera wskazanej gałęzi.');
+        return strtolower($matches[1]);
+    }
+
+    private function localCommit()
+    {
+        if (!is_dir($this->config['appRoot'] . '/.git')) return null;
+        $result = $this->run(['git', '-C', $this->config['appRoot'], 'rev-parse', 'HEAD'], [], null, true);
+        $commit = trim($result['stdout']);
+        return preg_match('/^[a-f0-9]{40}$/', $commit) ? strtolower($commit) : null;
+    }
+
+    private function preparePersistentData()
+    {
+        $this->ensureDirectory($this->config['dataRoot'], 0750);
+        $group = trim($this->run(['id', '-gn', $this->config['serviceUser']])['stdout']);
+        $this->run(['chown', '-R', $this->config['serviceUser'] . ':' . $group, $this->config['dataRoot']]);
+    }
+
+    private function writeEnvironment()
+    {
+        $values = $this->readEnvironment();
+        $values = array_merge($values, [
+            'KITSUNE_HOST' => '127.0.0.1',
+            'KITSUNE_PORT' => (string) $this->config['appPort'],
+            'KITSUNE_SSH_HOST' => '0.0.0.0',
+            'KITSUNE_SSH_PORT' => (string) $this->config['sshPort'],
+            'KITSUNE_METADATA_BACKEND' => 'sqlite',
+            'KITSUNE_DATA_PATH' => $this->config['dataRoot'],
+            'KITSUNE_LFS_MAX_OBJECT_BYTES' => (string) $this->config['lfsMaxObjectBytes'],
+            'KITSUNE_PUBLIC_URL' => 'https://' . $this->config['domain'],
+            'KITSUNE_PLESK_DOMAIN' => $this->config['domain'],
+            'KITSUNE_APP_ROOT' => $this->config['appRoot'],
+            'KITSUNE_WEBAUTHN_ORIGIN' => 'https://' . $this->config['domain'],
+            'KITSUNE_WEBAUTHN_RP_ID' => $this->config['domain'],
+            'KITSUNE_PREVIEW_HELPER_PORT' => (string) ($this->config['appPort'] + 1),
+            'KITSUNE_PREVIEW_PROVISIONER_URL' => 'http://127.0.0.1:' . ($this->config['appPort'] + 1) . '/',
+        ]);
+        foreach (['KITSUNE_ADMIN_TOKEN', 'KITSUNE_SECRET_KEY', 'KITSUNE_PREVIEW_SECRET'] as $secret) if (empty($values[$secret])) $values[$secret] = bin2hex(random_bytes(32));
+        $this->writeEnvironmentValues($values);
+    }
+
+    private function readEnvironment()
+    {
+        $values = [];
+        if (!is_file(self::ENV_FILE)) return $values;
+        foreach (preg_split('/\r?\n/', (string) file_get_contents(self::ENV_FILE)) as $line) {
+            if ($line === '' || strpos($line, '=') === false) continue;
+            [$key, $value] = explode('=', $line, 2);
+            if (preg_match('/^[A-Z][A-Z0-9_]*$/', $key)) $values[$key] = $value;
+        }
+        return $values;
+    }
+
+    private function writeEnvironmentValues(array $values)
+    {
+        ksort($values);
+        $lines = [];
+        foreach ($values as $key => $value) {
+            if (!preg_match('/^[A-Z][A-Z0-9_]*$/', (string) $key) || preg_match('/[\x00\r\n]/', (string) $value)) throw new RuntimeException('Nieprawidłowa wartość pliku środowiskowego.');
+            $lines[] = $key . '=' . $value;
+        }
+        $this->writeSecureFile(self::ENV_FILE, implode("\n", $lines) . "\n", 0600);
+    }
+
+    private function writeServices()
+    {
+        $app = $this->config['appRoot'];
+        $data = $this->config['dataRoot'];
+        $user = $this->config['serviceUser'];
+        $group = trim($this->run(['id', '-gn', $user])['stdout']);
+        $service = "[Unit]\nDescription=KitsuneGIT Web\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser={$user}\nGroup={$group}\nEnvironmentFile=" . self::ENV_FILE . "\nWorkingDirectory={$app}\nExecStart=/usr/bin/env node {$app}/src/server/cli.js\nRestart=on-failure\nRestartSec=5\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths={$data}\n\n[Install]\nWantedBy=multi-user.target\n";
+        $preview = "[Unit]\nDescription=KitsuneGIT Plesk Preview Provisioner\nAfter=network.target\n\n[Service]\nType=simple\nUser=root\nGroup=root\nEnvironmentFile=" . self::ENV_FILE . "\nWorkingDirectory={$app}\nExecStart=/usr/bin/env node {$app}/src/server/plesk-preview-helper.js\nRestart=on-failure\nRestartSec=5\nPrivateTmp=true\nProtectHome=true\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\n\n[Install]\nWantedBy=multi-user.target\n";
+        $this->writeSecureFile(self::SERVICE_FILE, $service, 0644);
+        $this->writeSecureFile(self::PREVIEW_SERVICE_FILE, $preview, 0644);
+    }
+
+    private function waitForReadiness()
+    {
+        $url = 'http://127.0.0.1:' . $this->config['appPort'] . '/api/v1/ready';
+        $last = '';
+        for ($attempt = 0; $attempt < 30; $attempt++) {
+            $result = $this->run(['curl', '--silent', '--show-error', '--fail', '--max-time', '2', $url], [], null, true);
+            $last = trim($result['stderr'] . ' ' . $result['stdout']);
+            if ($result['code'] === 0 && strpos($result['stdout'], '"status":"ready"') !== false) return;
+            usleep(500000);
+        }
+        throw new RuntimeException('Healthcheck /api/v1/ready nie potwierdził gotowości: ' . substr($last, -500));
+    }
+
+    private function collectStatus($includeCredentials)
+    {
+        $prerequisites = $this->prerequisiteStatus();
+        $application = $this->serviceState('kitsune-git.service');
+        $preview = $this->serviceState('kitsune-git-preview.service');
+        $readiness = $this->run(['curl', '--silent', '--output', '/dev/null', '--write-out', '%{http_code}', '--max-time', '2', 'http://127.0.0.1:' . $this->config['appPort'] . '/api/v1/ready'], [], null, true);
+        $httpCode = trim($readiness['stdout']);
+        $ready = $httpCode === '200';
+        $this->state['service'] = ['application' => $application, 'preview' => $preview, 'ready' => $ready, 'httpCode' => $httpCode !== '000' ? $httpCode : null];
+        $this->state['prerequisites'] = $prerequisites;
+        $this->state['runtime'] = array_merge((array) ($this->state['runtime'] ?? []), [
+            'domain' => $this->config['domain'], 'publicUrl' => $this->config['domain'] !== '' ? 'https://' . $this->config['domain'] : '', 'sshPort' => $this->config['sshPort'],
+            'appPort' => $this->config['appPort'], 'appRoot' => $this->config['appRoot'], 'dataRoot' => $this->config['dataRoot'],
+        ]);
+        $local = $this->localCommit();
+        if ($local) $this->state['repository']['localCommit'] = $local;
+        $this->saveState();
+        $result = ['service' => $this->state['service'], 'prerequisites' => $prerequisites, 'runtime' => $this->state['runtime']];
+        if ($includeCredentials) {
+            $environment = $this->readEnvironment();
+            $result['adminToken'] = (string) ($environment['KITSUNE_ADMIN_TOKEN'] ?? '');
+        }
+        return $result;
+    }
+
+    private function prerequisiteStatus()
+    {
+        $checks = [];
+        foreach ([
+            'node' => ['node', '--version'], 'npm' => ['npm', '--version'], 'git' => ['git', '--version'],
+            'ssh' => ['ssh', '-V'], 'curl' => ['curl', '--version'], 'systemd' => ['systemctl', '--version'],
+        ] as $name => $command) {
+            $result = $this->run($command, [], null, true);
+            $detail = trim($result['stdout'] !== '' ? $result['stdout'] : $result['stderr']);
+            $checks[$name] = ['ok' => $result['code'] === 0, 'version' => strtok($detail, "\r\n") ?: 'niedostępne'];
+        }
+        $checks['pleskDomain'] = ['ok' => $this->config['domain'] !== '' && is_dir('/var/www/vhosts/system/' . $this->config['domain'] . '/conf'), 'version' => $this->config['domain'] !== '' ? $this->config['domain'] : 'nie wybrano'];
+        return $checks;
+    }
+
+    private function assertPrerequisites($requireNode)
+    {
+        if (PHP_OS_FAMILY !== 'Linux') throw new RuntimeException('KitsuneGIT dla Pleska wymaga Linuxa.');
+        $checks = $this->prerequisiteStatus();
+        foreach (['git', 'ssh', 'curl', 'systemd'] as $name) if (empty($checks[$name]['ok'])) throw new RuntimeException('Brak wymaganego narzędzia: ' . $name . '.');
+        if ($requireNode) {
+            foreach (['node', 'npm'] as $name) if (empty($checks[$name]['ok'])) throw new RuntimeException('Brak wymaganego narzędzia: ' . $name . '.');
+            $node = $this->run(['node', '-p', 'process.versions.node.split(".")[0]']);
+            if ((int) trim($node['stdout']) < 22) throw new RuntimeException('Wymagany jest Node.js 22 lub nowszy.');
+        }
+        $this->run(['id', $this->config['serviceUser']]);
+    }
+
+    private function serviceState($unit)
+    {
+        $result = $this->run(['systemctl', 'is-active', $unit], [], null, true);
+        $value = trim($result['stdout']);
+        return $value !== '' ? $value : 'not-installed';
+    }
+
+    private function removeInstallation()
+    {
+        $this->run(['systemctl', 'disable', '--now', 'kitsune-git.service'], [], null, true);
+        $this->run(['systemctl', 'disable', '--now', 'kitsune-git-preview.service'], [], null, true);
+        @unlink(self::SERVICE_FILE);
+        @unlink(self::PREVIEW_SERVICE_FILE);
+        $environment = $this->readEnvironment();
+        $legacyDomain = is_file(self::LEGACY_DOMAIN_FILE) ? trim((string) file_get_contents(self::LEGACY_DOMAIN_FILE)) : '';
+        if ($legacyDomain !== '') $this->removeLegacyVhost($legacyDomain);
+        @unlink(self::LEGACY_DOMAIN_FILE);
+        $appRoot = (string) ($environment['KITSUNE_APP_ROOT'] ?? '/opt/kitsune-git');
+        if (preg_match('#^/(?:home|opt|srv|var/lib)/[A-Za-z0-9._/-]+$#', $appRoot) && !in_array('..', explode('/', $appRoot), true)) {
+            $this->removeTree(rtrim($appRoot, '/'));
+            $this->removeTree(rtrim($appRoot, '/') . '.previous');
+        }
+        @unlink(self::ENV_FILE);
+        $this->run(['systemctl', 'daemon-reload'], [], null, true);
+    }
+
+    private function removeLegacyVhost($domain)
+    {
+        $domain = strtolower(trim((string) $domain));
+        if (!preg_match('/^(?:[a-z0-9-]+\.)+[a-z0-9-]+$/', $domain)) return;
+        $path = '/var/www/vhosts/system/' . $domain . '/conf/vhost_nginx.conf';
+        if (!is_file($path) || strpos((string) file_get_contents($path), '# kitsune-git-managed') === false) return;
+        @unlink($path);
+    }
+
+    private function run(array $command, array $environment = [], $cwd = null, $allowFailure = false)
+    {
+        $pipes = [];
+        $baseEnvironment = getenv();
+        if (!is_array($baseEnvironment)) $baseEnvironment = [];
+        $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, $cwd, array_merge($baseEnvironment, $environment), ['bypass_shell' => true]);
+        if (!is_resource($process)) throw new RuntimeException('Nie można uruchomić: ' . implode(' ', $command));
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $code = proc_close($process);
+        $result = ['code' => $code, 'stdout' => (string) $stdout, 'stderr' => (string) $stderr];
+        if (!$allowFailure && $code !== 0) {
+            $detail = trim($stderr !== '' ? $stderr : $stdout);
+            throw new RuntimeException($this->safeMessage($detail !== '' ? $detail : 'Polecenie zakończyło się kodem ' . $code . '.'));
+        }
+        return $result;
+    }
+
+    private function ensureDirectory($path, $mode)
+    {
+        if (!is_dir($path) && !mkdir($path, $mode, true) && !is_dir($path)) throw new RuntimeException('Nie można utworzyć katalogu: ' . $path . '.');
+        @chmod($path, $mode);
+    }
+
+    private function writeSecureFile($path, $content, $mode)
+    {
+        $directory = dirname($path);
+        if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) throw new RuntimeException('Nie można utworzyć katalogu pliku.');
+        $temporary = $path . '.tmp-' . bin2hex(random_bytes(6));
+        $previous = umask(0077);
+        try {
+            if (file_put_contents($temporary, $content, LOCK_EX) === false) throw new RuntimeException('Nie można zapisać pliku: ' . $path . '.');
+            @chmod($temporary, $mode);
+            if (!rename($temporary, $path)) throw new RuntimeException('Nie można aktywować pliku: ' . $path . '.');
+            @chmod($path, $mode);
+        } finally {
+            umask($previous);
+            if (is_file($temporary)) @unlink($temporary);
+        }
+    }
+
+    private function readState()
+    {
+        $empty = ['updatedAt' => null, 'lastOperation' => null, 'lastSuccess' => null, 'lastError' => null, 'repository' => [], 'service' => [], 'runtime' => [], 'deployKey' => [], 'prerequisites' => [], 'deployment' => [], 'log' => []];
+        if (!is_file($this->statePath)) return $empty;
+        $decoded = json_decode((string) file_get_contents($this->statePath), true);
+        return is_array($decoded) ? array_replace_recursive($empty, $decoded) : $empty;
+    }
+
+    private function saveState()
+    {
+        if ($this->statePath === '') return;
+        $this->state['updatedAt'] = gmdate('c');
+        $this->state['log'] = array_slice((array) ($this->state['log'] ?? []), -250);
+        $json = json_encode($this->state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $this->writeSecureFile($this->statePath, $json . "\n", 0600);
+        if ($this->stateOwner !== null) @chown($this->statePath, $this->stateOwner);
+        if ($this->stateGroup !== null) @chgrp($this->statePath, $this->stateGroup);
+    }
+
+    private function log($message)
+    {
+        $this->state['log'][] = '[' . gmdate('c') . '] ' . $this->safeMessage($message);
+    }
+
+    private function safeMessage($message)
+    {
+        $secrets = array_values(array_filter([$this->config['gitToken'] ?? '', $this->config['gitSshPrivateKey'] ?? ''], function ($value) { return $value !== ''; }));
+        if ($secrets) $message = str_replace($secrets, '[SECRET]', (string) $message);
+        return substr(trim(preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $message)), 0, 4000);
+    }
+
+    private function removeTree($path, $temporary = false)
+    {
+        if ($path === '' || $path === '/' || $path === '/opt' || $path === '/var' || $path === '/var/lib') throw new RuntimeException('Odmowa usunięcia zbyt szerokiej ścieżki.');
+        $configuredStage = !empty($this->config['appRoot']) ? dirname($this->config['appRoot']) . '/.kitsune-git-stage-' : '';
+        if ($temporary && strpos($path, sys_get_temp_dir() . '/kitsune-git-') !== 0 && strpos($path, '/opt/.kitsune-git-') !== 0 && ($configuredStage === '' || strpos($path, $configuredStage) !== 0) && $path !== '/opt/kitsune-git' && $path !== '/opt/kitsune-git.previous') return;
+        if (is_link($path) || is_file($path)) { @unlink($path); return; }
+        if (!is_dir($path)) return;
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($iterator as $item) {
+            if ($item->isLink() || $item->isFile()) @unlink($item->getPathname()); else @rmdir($item->getPathname());
+        }
+        @rmdir($path);
+    }
 }
-EOF
-  chmod 600 "$NGINX_CONFIG"
-  printf '%s\n' "$DOMAIN" > "$DOMAIN_FILE"
-  plesk sbin httpdmng --reconfigure-domain "$DOMAIN"
-  systemctl daemon-reload
-  systemctl enable --now kitsune-git-preview.service
-  systemctl enable --now kitsune-git.service
-  systemctl restart kitsune-git-preview.service
-  systemctl restart kitsune-git.service
-  systemctl is-active kitsune-git.service
-}
 
-require_linux
-case "$ACTION" in
-  install) install_release "$@" ;;
-  restart) systemctl restart kitsune-git-preview.service kitsune-git.service; systemctl is-active kitsune-git-preview.service; systemctl is-active kitsune-git.service ;;
-  status) systemctl is-active kitsune-git-preview.service 2>/dev/null || true; systemctl is-active kitsune-git.service 2>/dev/null || echo "not-installed" ;;
-  credentials)
-    [ -f "$ENV_FILE" ] || { echo "KitsuneGIT is not installed" >&2; exit 3; }
-    sed -n '/^KITSUNE_PUBLIC_URL=/p;/^KITSUNE_ADMIN_TOKEN=/p;/^KITSUNE_SSH_PORT=/p' "$ENV_FILE"
-    ;;
-  remove)
-    systemctl disable --now kitsune-git.service 2>/dev/null || true
-    systemctl disable --now kitsune-git-preview.service 2>/dev/null || true
-    rm -f -- "$SERVICE_FILE" "$PREVIEW_SERVICE_FILE"
-    if [ -f "$DOMAIN_FILE" ]; then
-      DOMAIN="$(cat "$DOMAIN_FILE")"
-      NGINX_CONFIG="/var/www/vhosts/system/$DOMAIN/conf/vhost_nginx.conf"
-      if [ -f "$NGINX_CONFIG" ] && grep -q '# kitsune-git-managed' "$NGINX_CONFIG"; then
-        rm -f -- "$NGINX_CONFIG"
-        plesk sbin httpdmng --reconfigure-domain "$DOMAIN" || true
-      fi
-      rm -f -- "$DOMAIN_FILE"
-    fi
-    rm -rf -- "$APP_ROOT" "$APP_ROOT.previous"
-    rm -f -- "$ENV_FILE"
-    systemctl daemon-reload
-    echo "Service removed; persistent repositories remain in $DATA_ROOT"
-    ;;
-  *) echo "Usage: kitsune-service {install URL SHA256 DOMAIN SSH_PORT|restart|status|credentials|remove}" >&2; exit 2 ;;
-esac
+try {
+    (new KitsuneGitPleskManager())->execute($argv);
+} catch (Throwable $exception) {
+    fwrite(STDERR, $exception->getMessage() . "\n");
+    exit(1);
+}

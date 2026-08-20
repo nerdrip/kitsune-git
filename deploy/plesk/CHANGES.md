@@ -1,3 +1,11 @@
+# 1.4.0-1
+
+* Rebuilt the extension as a complete Plesk deployment manager with clear status, deployment, repository/domain, access, and diagnostics sections.
+* Added active Plesk domain selection and managed nginx reverse-proxy generation for HTTP, WebSocket, Smart HTTP, and Git LFS traffic.
+* Added public HTTPS, private HTTPS token, generated deployment key, and custom SSH key source authentication without leaking credentials to URLs or logs.
+* Added staged deployment, prerequisite checks, readiness verification, atomic activation, rollback, service restart, admin-token rotation, and persistent runtime state.
+* Added independent verified plugin self-update while retaining Kitsune Hub Suite navigation and central management compatibility.
+
 # 1.3.0-2
 
 * Added the shared Kitsune Plesk Suite shell and direct central-management navigation.
