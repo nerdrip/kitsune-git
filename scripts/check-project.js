@@ -92,6 +92,9 @@ if (!extraResources.includes('build/runtime/${os}-${arch}') || !extraResources.i
 if (!fs.existsSync(path.join(ROOT, 'THIRD_PARTY_NOTICES.md'))) fail('Missing third-party runtime notices');
 
 const pleskServiceSource = read('deploy/plesk/sbin/kitsune-service');
+if (!pleskServiceSource.startsWith('#!/usr/bin/env php\n') || pleskServiceSource.includes('\r\n')) {
+  fail('Plesk service entrypoint must use LF line endings');
+}
 if (/proc_open\(\$command\s*,/.test(pleskServiceSource)) {
   fail('Plesk service passes an argument array directly to proc_open without a PHP < 7.4 fallback');
 }

@@ -1,3 +1,7 @@
+# 1.4.0-3
+
+* Fixed the Linux service entrypoint in Windows-built packages by enforcing LF line endings and rejecting CRLF during packaging.
+
 # 1.4.0-2
 
 * Fixed process execution on Plesk hosts whose system PHP is older than 7.4 while retaining shell-safe argument escaping.

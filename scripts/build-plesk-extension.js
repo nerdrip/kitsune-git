@@ -5,6 +5,10 @@ const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const source = path.join(root, 'deploy', 'plesk');
 const metadata = fs.readFileSync(path.join(source, 'meta.xml'), 'utf8');
+const serviceEntrypoint = fs.readFileSync(path.join(source, 'sbin', 'kitsune-service'), 'utf8');
+if (!serviceEntrypoint.startsWith('#!/usr/bin/env php\n') || serviceEntrypoint.includes('\r\n')) {
+  throw new Error('Plesk service entrypoint must use LF line endings');
+}
 const version = metadata.match(/<version>([^<]+)<\/version>/)?.[1]?.trim();
 const release = metadata.match(/<release>([^<]+)<\/release>/)?.[1]?.trim();
 if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version || '') || !/^\d+$/.test(release || '')) throw new Error('Invalid Plesk extension version metadata');
