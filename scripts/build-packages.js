@@ -125,8 +125,8 @@ function main() {
   }
 
   const [majorNodeVersion, minorNodeVersion] = process.versions.node.split('.').map(Number);
-  if (majorNodeVersion < 22 || (majorNodeVersion === 22 && minorNodeVersion < 12)) {
-    throw new Error('Node.js 22.12.0 or newer is required to build KitsuneGIT');
+  if (majorNodeVersion < 22 || (majorNodeVersion === 22 && minorNodeVersion < 13)) {
+    throw new Error('Node.js 22.13.0 or newer is required to build KitsuneGIT');
   }
 
   if (!options.skipVerify) runNpm(['run', 'verify']);

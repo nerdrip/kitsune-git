@@ -8,21 +8,15 @@ on:
         required: false
         default: false
         type: boolean
+  release:
+    types:
+      - published
   push:
     branches:
       - main
-    paths:
-      - package.json
-      - package-lock.json
-      - .github/workflows/build-packages.yml
-      - scripts/build-packages.js
-      - scripts/build-environment.js
-      - scripts/generate-icons.js
-      - scripts/prepare-git-runtime.js
-      - src/git/runtime-manifest.json
-      - build/**
     tags:
       - 'v*'
+      - '[0-9]*'
 
 permissions:
   contents: read
@@ -56,6 +50,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || '' }}
           BEFORE_SHA: ${{ github.event.before }}
           REBUILD_EXISTING: ${{ inputs.rebuild_existing || false }}
         run: |
@@ -65,11 +60,25 @@ jobs:
             echo "package.json contains an invalid release version: $version" >&2
             exit 1
           fi
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && ( "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ) ]]; then
+            echo "Manual release builds must run from main" >&2
+            exit 1
+          fi
 
           tag="v${version}"
-          if [[ "$REF_TYPE" == "tag" && "$REF_NAME" != "$tag" ]]; then
-            echo "Git tag $REF_NAME does not match package.json version $tag" >&2
-            exit 1
+          requested_tag=""
+          if [[ "$REF_TYPE" == "tag" ]]; then requested_tag="$REF_NAME"; fi
+          if [[ -n "$RELEASE_TAG" ]]; then requested_tag="$RELEASE_TAG"; fi
+          if [[ -n "$requested_tag" ]]; then
+            if [[ "$requested_tag" != "$tag" && "$requested_tag" != "$version" ]]; then
+              echo "Git tag $requested_tag does not match package.json version $version" >&2
+              exit 1
+            fi
+            tag="$requested_tag"
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "Release tag $tag does not point to a commit on main" >&2
+              exit 1
+            fi
           fi
 
           should_release=true
@@ -114,8 +123,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22.12.0
+          node-version-file: .nvmrc
           cache: npm
+
+      - name: Verify Node.js runtime capabilities
+        run: node -e "require('node:sqlite')"
 
       - name: Install dependencies
         run: npm ci
@@ -169,7 +181,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22.12.0
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install native Git build dependencies
@@ -215,11 +227,49 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  server:
+    name: Standalone server and Plesk extension
+    needs:
+      - prepare
+      - verify
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build standalone server archive
+        run: npm run build:server
+
+      - name: Build Plesk extension archive
+        run: npm run build:plesk
+
+      - name: Upload server packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-server-packages
+          path: |
+            dist/KitsuneGIT-Server-*.tar.gz
+            dist/KitsuneGIT-Plesk-*.zip
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
     name: Publish GitHub Release
     needs:
       - prepare
       - build
+      - server
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -272,6 +322,8 @@ jobs:
           require_asset "latest.yml"
           require_asset "latest-mac.yml"
           require_asset "latest-linux.yml"
+          require_asset "KitsuneGIT-Server-${VERSION}.tar.gz"
+          require_asset "KitsuneGIT-Plesk-*.zip"
 
           (
             cd release-assets
@@ -295,6 +347,8 @@ jobs:
             echo "| Windows | NSIS setup EXE | Portable EXE |"
             echo "| macOS | DMG | ZIP application bundle |"
             echo "| Linux | DEB / RPM | AppImage / tar.gz |"
+            echo
+            echo "The release also includes the standalone KitsuneGIT Server source archive and the native Plesk extension package."
             echo
             echo "Verify downloaded files with \`SHA256SUMS.txt\`. Unsigned local/community builds may show normal operating-system security warnings."
           } > release-overview.md

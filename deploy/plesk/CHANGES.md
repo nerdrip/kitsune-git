@@ -1,3 +1,7 @@
+# 1.4.0-4
+
+* Raised the minimum Node.js version to 22.13 so the built-in SQLite backend is available without experimental flags.
+
 # 1.4.0-3
 
 * Fixed the Linux service entrypoint in Windows-built packages by enforcing LF line endings and rejecting CRLF during packaging.

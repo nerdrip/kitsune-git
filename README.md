@@ -20,7 +20,7 @@ An automation can run manually or as an app-level `after commit` hook with optio
 
 ## Requirements
 
-- Node.js 22.12.0 or newer for development/building (Node.js 22 LTS is recommended)
+- Node.js 22.13.0 or newer for development/building (Node.js 22 LTS is recommended)
 - A native build host for release packages: Windows for NSIS/portable EXE, macOS for DMG/ZIP, and Linux for DEB/RPM/AppImage/tar.gz
 
 End users do not need to install Git separately. In automatic mode KitsuneGIT prefers a supported system Git and falls back to the bundled runtime. Settings allow `Automatic`, `System`, `Managed`, or `Custom` selection, with an optional per-repository override.
@@ -92,9 +92,11 @@ npm run build:mac
 npm run build:all       # every format and architecture for the native host
 
 node scripts/build-packages.js --help
+npm run build:server    # standalone server source archive
+npm run build:plesk     # native Plesk extension archive
 ```
 
-Reliable packages for all operating systems cannot be produced on one host because macOS packaging/signing requires macOS and platform toolchains differ. The six-job matrix in `.github/workflows/build-packages.yml` builds x64 and arm64 artifacts for Windows, macOS, and Linux. macOS and Linux use native runners; Windows ARM64 is cross-built on the stable Windows x64 runner because electron-builder's icon helper is currently unreliable on GitHub's native Windows ARM runner.
+Reliable client packages for all operating systems cannot be produced on one host because macOS packaging/signing requires macOS and platform toolchains differ. The six-job client matrix in `.github/workflows/build-packages.yml` builds x64 and arm64 artifacts for Windows, macOS, and Linux. A separate Linux job builds the standalone server archive and Plesk extension. macOS and Linux use native runners; Windows ARM64 is cross-built on the stable Windows x64 runner because electron-builder's icon helper is currently unreliable on GitHub's native Windows ARM runner.
 
 The runtime build inputs are pinned in `src/git/runtime-manifest.json`. Windows packages use the official MinGit ZIP; macOS/Linux jobs build the official Git source release natively. GCM and Git LFS native archives are included when the platform Git distribution does not already provide them. See [docs/RUNTIME.md](docs/RUNTIME.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
@@ -110,9 +112,9 @@ Unsigned local packages are suitable for testing. Public distribution should pro
 
 ### Automatic GitHub releases
 
-GitHub Actions verifies pull requests and pushes on Windows, macOS, and Linux. A release build starts when a `v*` tag is pushed or when a version change in `package.json` is merged to `main`. The workflow builds x64 and ARM64 packages for all three systems, verifies that every expected installer and portable archive exists, combines the artifacts, generates `SHA256SUMS.txt`, and creates the corresponding GitHub Release automatically. Versions containing a suffix such as `-beta5` are marked as prereleases.
+GitHub Actions verifies pull requests and pushes on Windows, macOS, and Linux with the Node.js version pinned in `.nvmrc`. A release build evaluates every push to `main`, version-matching tags with or without a `v` prefix, and GitHub Releases published from a commit on `main`. It builds x64 and ARM64 desktop packages for all three systems plus a standalone server archive and Plesk extension, verifies every expected asset, generates `SHA256SUMS.txt`, and creates or updates the corresponding GitHub Release. Versions containing a suffix such as `-beta5` are marked as prereleases.
 
-Publishing is all-or-nothing: GitHub Release is created only after verification and all six package jobs pass, so users never see a silently incomplete release. If a run fails before creating the release, merging a fix to the release workflow, package script, runtime manifest, lockfile, or build resources automatically retries the still-missing current version even when its number did not change.
+Publishing is all-or-nothing: GitHub Release is created only after verification, all six client package jobs, and the server package job pass, so users never see a silently incomplete release. If a run fails before creating the release, the next push to `main` retries the still-missing current version even when its number did not change.
 
 If a release for the package version already exists, an ordinary merge does not replace it. To repair or intentionally replace its assets, open **Actions → Build and publish release → Run workflow**, enable `rebuild_existing`, and run it from `main`. Signing and Apple notarization are enabled automatically when the repository secrets listed above are configured; otherwise the workflow produces unsigned test/community packages. Empty signing secrets are removed before `electron-builder` starts so they cannot be interpreted as certificate paths, while configured credentials are passed through unchanged.
 

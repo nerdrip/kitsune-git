@@ -39,6 +39,16 @@ const packageLock = JSON.parse(read('package-lock.json'));
 if (packageLock.version !== packageJson.version || packageLock.packages?.['']?.version !== packageJson.version) {
   fail('package.json and package-lock.json versions do not match');
 }
+const pinnedNodeVersion = '22.23.2';
+const minimumNodeVersion = '22.13.0';
+if (read('.nvmrc').trim() !== pinnedNodeVersion || packageJson.engines?.node !== `>=${minimumNodeVersion}`) {
+  fail(`CI must pin Node.js ${pinnedNodeVersion} and package.json must require ${minimumNodeVersion} or newer`);
+}
+try {
+  require('node:sqlite');
+} catch {
+  fail('The active Node.js runtime does not provide node:sqlite; use the version from .nvmrc');
+}
 
 try {
   const Ajv = require('ajv');
@@ -103,11 +113,18 @@ if (!/PHP_VERSION_ID\s*<\s*70400[\s\S]{0,300}escapeshellarg/.test(pleskServiceSo
 }
 
 const workflowSource = read('.github/workflows/build-packages.yml');
+const ciWorkflowSource = read('.github/workflows/ci.yml');
+for (const [name, source] of [['CI', ciWorkflowSource], ['release', workflowSource]]) {
+  if (!source.includes('node-version-file: .nvmrc')) fail(`${name} workflow does not use the pinned Node.js version`);
+}
 for (const runner of ['windows-latest', 'macos-15-intel', 'macos-15', 'ubuntu-24.04', 'ubuntu-24.04-arm']) {
   if (!workflowSource.includes(`os: ${runner}`)) fail(`Package workflow is missing runner: ${runner}`);
 }
 if ((workflowSource.match(/os: windows-latest/g) || []).length < 2) {
   fail('Package workflow does not cross-build both Windows architectures on the stable runner');
+}
+for (const requiredReleaseText of ['npm run build:server', 'npm run build:plesk', 'KitsuneGIT-Server-${VERSION}.tar.gz', 'KitsuneGIT-Plesk-*.zip']) {
+  if (!workflowSource.includes(requiredReleaseText)) fail(`Package workflow is missing server release integration: ${requiredReleaseText}`);
 }
 
 const mainSource = read('src/main/main.js');

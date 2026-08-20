@@ -432,8 +432,9 @@ final class KitsuneGitPleskManager
         foreach (['git', 'ssh', 'curl', 'systemd'] as $name) if (empty($checks[$name]['ok'])) throw new RuntimeException('Brak wymaganego narzędzia: ' . $name . '.');
         if ($requireNode) {
             foreach (['node', 'npm'] as $name) if (empty($checks[$name]['ok'])) throw new RuntimeException('Brak wymaganego narzędzia: ' . $name . '.');
-            $node = $this->run(['node', '-p', 'process.versions.node.split(".")[0]']);
-            if ((int) trim($node['stdout']) < 22) throw new RuntimeException('Wymagany jest Node.js 22 lub nowszy.');
+            $node = $this->run(['node', '-p', 'process.versions.node']);
+            $nodeParts = array_map('intval', explode('.', trim($node['stdout'])));
+            if (($nodeParts[0] ?? 0) < 22 || (($nodeParts[0] ?? 0) === 22 && ($nodeParts[1] ?? 0) < 13)) throw new RuntimeException('Wymagany jest Node.js 22.13 lub nowszy.');
         }
         $this->run(['id', $this->config['serviceUser']]);
     }
