@@ -4,7 +4,11 @@ const { spawnSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
 const source = path.join(root, 'deploy', 'plesk');
-const output = path.join(root, 'dist', 'KitsuneGIT-Plesk-1.3.0.zip');
+const metadata = fs.readFileSync(path.join(source, 'meta.xml'), 'utf8');
+const version = metadata.match(/<version>([^<]+)<\/version>/)?.[1]?.trim();
+const release = metadata.match(/<release>([^<]+)<\/release>/)?.[1]?.trim();
+if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version || '') || !/^\d+$/.test(release || '')) throw new Error('Invalid Plesk extension version metadata');
+const output = path.join(root, 'dist', `KitsuneGIT-Plesk-${version}-r${release}.zip`);
 fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.rmSync(output, { force: true });
 

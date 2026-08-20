@@ -1,18 +1,109 @@
-<div data-kitsune-suite data-suite-product="<?php echo $this->escape((string) $this->suiteProduct); ?>" data-suite-version="<?php echo $this->escape((string) $this->suiteVersion); ?>" data-suite-hub="<?php echo $this->suiteHubActive ? '1' : '0'; ?>"></div>
-<main class="kitsune-git-shell">
-<header class="kitsune-git-hero"><span>KITSUNEGIT · PLESK · MANAGER</span><h2>KitsuneGIT Web</h2><p>Instalacja, stan usługi i bezpieczna konfiguracja wydania w jednym miejscu.</p></header>
-<p>Service status: <strong><?php echo $this->escape($this->serviceStatus); ?></strong></p>
-<?php if ($this->publicUrl): ?>
-  <p><a class="btn action" href="<?php echo $this->escape($this->publicUrl); ?>" target="_blank" rel="noopener">Open KitsuneGIT Web</a></p>
-  <p>Git SSH base: <code><?php echo $this->escape($this->sshUrl); ?></code></p>
-<?php endif; ?>
-<?php if ($this->adminToken): ?>
-  <p><label>Desktop / API administrator token<br><input type="text" readonly value="<?php echo $this->escape($this->adminToken); ?>" style="width:100%"></label></p>
-<?php endif; ?>
-<form method="post" action="<?php echo pm_Context::getActionUrl('index', 'restart'); ?>">
-  <button type="submit" class="btn">Restart service</button>
-</form>
-<hr>
-<h3>Install or upgrade</h3>
-<?php echo $this->form; ?>
+<?php
+$e = function ($value) { return $this->escape((string) $value); };
+$config = (array) $this->config;
+$state = (array) $this->state;
+$service = (array) ($state['service'] ?? []);
+$repository = (array) ($state['repository'] ?? []);
+$deployment = (array) ($state['deployment'] ?? []);
+$deployKey = (array) ($state['deployKey'] ?? []);
+$runtime = (array) ($this->runtimeStatus['runtime'] ?? $state['runtime'] ?? []);
+$prerequisites = (array) ($this->runtimeStatus['prerequisites'] ?? $state['prerequisites'] ?? []);
+$adminToken = (string) ($this->runtimeStatus['adminToken'] ?? '');
+$activeTab = (string) $this->activeTab;
+$shortCommit = function ($value) { return preg_match('/^[a-f0-9]{40}$/', (string) $value) ? substr((string) $value, 0, 12) : '—'; };
+$dateLabel = function ($value) { return $value ? date('Y-m-d H:i', strtotime((string) $value)) : 'nigdy'; };
+$ready = !empty($service['ready']);
+$configured = $config['domain'] !== '';
+?>
+<div data-kitsune-suite data-suite-product="<?php echo $e($this->suiteProduct); ?>" data-suite-version="<?php echo $e($this->suiteVersion); ?>" data-suite-hub="<?php echo $this->suiteHubActive ? '1' : '0'; ?>"></div>
+
+<main class="kgt-shell">
+  <header class="kgt-hero">
+    <div><span class="kgt-kicker">KITSUNEGIT · PLESK DEPLOYMENT MANAGER</span><h1>Własna platforma Git bez ręcznego grzebania w serwerze</h1><p>Repozytorium, bezpieczny dostęp, domena, usługi i aktualizacje w jednym, kontrolowanym procesie.</p></div>
+    <div class="kgt-hero-actions">
+      <?php if ($this->publicUrl): ?><a class="kgt-button kgt-button-light" href="<?php echo $e($this->publicUrl); ?>" target="_blank" rel="noopener noreferrer">Otwórz KitsuneGIT ↗</a><?php endif; ?>
+      <span class="kgt-state-pill <?php echo $ready ? 'is-success' : ($configured ? 'is-warning' : 'is-muted'); ?>"><i></i><?php echo $ready ? 'Platforma gotowa' : ($configured ? 'Wymaga wdrożenia' : 'Wymaga konfiguracji'); ?></span>
+    </div>
+  </header>
+
+  <?php if ($this->statusError): ?><div class="kgt-alert is-danger"><strong>Nie udało się odczytać pełnego stanu.</strong><span><?php echo nl2br($e($this->statusError)); ?></span></div><?php endif; ?>
+  <?php if (!empty($state['lastError'])): ?><div class="kgt-alert is-danger"><strong>Ostatnia operacja nie powiodła się.</strong><span><?php echo nl2br($e($state['lastError'])); ?></span></div><?php endif; ?>
+
+  <nav class="kgt-tabs" aria-label="Sekcje managera KitsuneGIT">
+    <?php foreach (['status' => ['●', 'Stan'], 'deploy' => ['↻', 'Wdrożenie'], 'config' => ['⚙', 'Repozytorium i domena'], 'access' => ['⌘', 'Klucze i dostęp'], 'diagnostics' => ['≡', 'Diagnostyka']] as $tab => $definition): ?>
+      <a class="kgt-tab<?php echo $activeTab === $tab ? ' is-active' : ''; ?>" href="?tab=<?php echo $e($tab); ?>"><span><?php echo $e($definition[0]); ?></span><?php echo $e($definition[1]); ?></a>
+    <?php endforeach; ?>
+  </nav>
+
+  <?php if ($activeTab === 'status'): ?>
+    <section class="kgt-panel-stack">
+      <div class="kgt-metric-grid">
+        <article class="kgt-metric"><span>APLIKACJA</span><strong><?php echo $e($service['application'] ?? 'not-installed'); ?></strong><small><?php echo $ready ? 'Readiness HTTP 200' : 'Healthcheck nie potwierdził gotowości'; ?></small></article>
+        <article class="kgt-metric"><span>PREVIEW PROVISIONER</span><strong><?php echo $e($service['preview'] ?? 'not-installed'); ?></strong><small>Środowiska podglądowe z merge requestów</small></article>
+        <article class="kgt-metric"><span>WERSJA WDROŻONA</span><strong><?php echo $e($deployment['version'] ?? '—'); ?></strong><small>commit <?php echo $e($shortCommit($deployment['commit'] ?? null)); ?></small></article>
+        <article class="kgt-metric"><span>DOMENA</span><strong><?php echo $e($config['domain'] ?: 'nie wybrano'); ?></strong><small>HTTPS i vhost zarządzane przez Pleska</small></article>
+      </div>
+
+      <article class="kgt-panel">
+        <div class="kgt-panel-heading"><div><span class="kgt-kicker">PRZEPŁYW RUCHU</span><h2>Co jest skonfigurowane</h2><p>Manager nie nadpisuje ręcznie pliku <code>vhost_nginx.conf</code>. Plesk generuje konfigurację z hooka przy każdej przebudowie domeny.</p></div><button type="button" class="kgt-button" data-kgt-refresh>Odśwież</button></div>
+        <div class="kgt-flow">
+          <div><span>1</span><strong><?php echo $e($config['domain'] ?: 'Domena Pleska'); ?></strong><small>TLS i publiczny adres</small></div><b>→</b>
+          <div><span>2</span><strong>Zarządzany reverse proxy</strong><small>WebSocket, Git HTTP i LFS</small></div><b>→</b>
+          <div><span>3</span><strong>127.0.0.1:<?php echo $e($config['appPort']); ?></strong><small>Proces KitsuneGIT Web</small></div><b>+</b>
+          <div><span>4</span><strong>Git SSH :<?php echo $e($config['sshPort']); ?></strong><small>Dedykowany transport repozytoriów</small></div>
+        </div>
+      </article>
+
+      <div class="kgt-two-columns">
+        <article class="kgt-panel"><div class="kgt-panel-heading"><div><span class="kgt-kicker">REPOZYTORIUM PRODUKTU</span><h2>Stan kodu platformy</h2></div></div><dl class="kgt-facts"><div><dt>Gałąź</dt><dd><?php echo $e($repository['branch'] ?? $config['repositoryBranch']); ?></dd></div><div><dt>Na serwerze</dt><dd><code><?php echo $e($shortCommit($repository['localCommit'] ?? null)); ?></code></dd></div><div><dt>W origin</dt><dd><code><?php echo $e($shortCommit($repository['remoteCommit'] ?? null)); ?></code></dd></div><div><dt>Sprawdzono</dt><dd><?php echo $e($dateLabel($repository['checkedAt'] ?? null)); ?></dd></div></dl><div class="kgt-inline-status <?php echo !empty($repository['updateAvailable']) ? 'is-warning' : 'is-success'; ?>"><i></i><span><?php echo empty($repository['remoteCommit']) ? 'Najpierw uruchom sprawdzenie origin.' : (!empty($repository['updateAvailable']) ? 'W repozytorium jest nowszy lub inny commit.' : 'Wdrożenie jest zgodne z ostatnim sprawdzeniem.'); ?></span></div></article>
+        <article class="kgt-panel"><div class="kgt-panel-heading"><div><span class="kgt-kicker">SZYBKI DOSTĘP</span><h2>Adresy użytkowników</h2></div></div><div class="kgt-address"><span>Panel i Git HTTPS</span><code id="kgt-public-url"><?php echo $e($this->publicUrl ?: '—'); ?></code><?php if ($this->publicUrl): ?><button type="button" data-kgt-copy="kgt-public-url">Kopiuj</button><?php endif; ?></div><div class="kgt-address"><span>Baza Git SSH</span><code id="kgt-ssh-url"><?php echo $e($this->sshUrl ?: '—'); ?></code><?php if ($this->sshUrl): ?><button type="button" data-kgt-copy="kgt-ssh-url">Kopiuj</button><?php endif; ?></div><p class="kgt-note">Pełny adres projektu ma postać <code><?php echo $e(($this->sshUrl ?: 'ssh://git@host:2222') . '/namespace/project.git'); ?></code>.</p></article>
+      </div>
+    </section>
+
+  <?php elseif ($activeTab === 'deploy'): ?>
+    <section class="kgt-panel-stack">
+      <article class="kgt-panel">
+        <div class="kgt-panel-heading"><div><span class="kgt-kicker">AKTUALIZACJA PLATFORMY</span><h2>Sprawdź, a potem świadomie wdróż</h2><p>Sprawdzenie tylko odpytuje origin. Wdrożenie klonuje wskazaną gałąź do stagingu, instaluje zależności, przełącza kod i wykonuje healthcheck. Błąd przywraca poprzednią wersję.</p></div></div>
+        <div class="kgt-operation-grid">
+          <div><span>1</span><strong>Sprawdź repozytorium</strong><p>Porównuje lokalny commit z gałęzią origin. Nie zmienia kodu ani usług.</p><form method="post"><input type="hidden" name="formType" value="operation"><input type="hidden" name="operation" value="check"><input type="hidden" name="returnTab" value="deploy"><button class="kgt-button" type="submit">Sprawdź origin</button></form></div>
+          <div class="is-primary"><span>2</span><strong>Pobierz i wdróż</strong><p>Aktualizuje kod z Git, zachowuje dane i sekrety, uruchamia usługi oraz sprawdza gotowość.</p><form method="post"><input type="hidden" name="formType" value="operation"><input type="hidden" name="operation" value="deploy"><input type="hidden" name="returnTab" value="deploy"><button class="kgt-button kgt-button-primary" type="submit" <?php echo !$configured ? 'disabled' : ''; ?>>Pobierz i wdróż</button></form></div>
+          <div><span>3</span><strong>Restart bez aktualizacji</strong><p>Nie pobiera kodu. Restartuje aplikację i provisioner, a potem wykonuje healthcheck.</p><form method="post"><input type="hidden" name="formType" value="operation"><input type="hidden" name="operation" value="restart"><input type="hidden" name="returnTab" value="deploy"><button class="kgt-button" type="submit">Restartuj usługi</button></form></div>
+        </div>
+      </article>
+      <article class="kgt-panel"><div class="kgt-panel-heading"><div><span class="kgt-kicker">PORÓWNANIE</span><h2>Ostatni znany stan gałęzi</h2></div><span class="kgt-state-pill <?php echo !empty($repository['updateAvailable']) ? 'is-warning' : 'is-success'; ?>"><i></i><?php echo empty($repository['remoteCommit']) ? 'Nie sprawdzono' : (!empty($repository['updateAvailable']) ? 'Dostępna zmiana' : 'Aktualna'); ?></span></div><div class="kgt-compare"><div><span>WDROŻONY KOD</span><strong><?php echo $e($shortCommit($repository['localCommit'] ?? null)); ?></strong><small><?php echo $e($deployment['version'] ?? 'brak wersji'); ?></small></div><b><?php echo !empty($repository['updateAvailable']) ? '≠' : '='; ?></b><div><span>ORIGIN / <?php echo $e($config['repositoryBranch']); ?></span><strong><?php echo $e($shortCommit($repository['remoteCommit'] ?? null)); ?></strong><small><?php echo $e($dateLabel($repository['checkedAt'] ?? null)); ?></small></div></div><div class="kgt-alert is-info"><strong>Dane trwałe nie są w repozytorium.</strong><span>Repozytoria użytkowników, baza SQLite, LFS i klucze hosta pozostają w <code><?php echo $e($config['dataRoot']); ?></code>. Aktualizacja ich nie usuwa.</span></div></article>
+    </section>
+
+  <?php elseif ($activeTab === 'config'): ?>
+    <section class="kgt-panel-stack">
+      <div class="kgt-alert is-info"><strong>Najkrótsza konfiguracja</strong><span>Wybierz domenę, pozostaw publiczne repozytorium i gałąź <code>main</code>, zapisz, a potem uruchom „Pobierz i wdróż”. Pozostałe wartości mają bezpieczne ustawienia domyślne.</span></div>
+      <form method="post" class="kgt-config-form" data-kgt-config>
+        <input type="hidden" name="formType" value="config">
+        <article class="kgt-panel"><div class="kgt-panel-heading"><div><span class="kgt-kicker">01 · PUBLIKACJA</span><h2>Domena z hostingu Pleska</h2><p>Lista zawiera tylko aktywne domeny i subdomeny z hostingiem WWW. Publiczny URL i konfiguracja vhost powstaną automatycznie.</p></div></div><div class="kgt-form-grid"><label class="kgt-field kgt-span-2"><span>Domena KitsuneGIT</span><select name="domain" required><option value="">— wybierz domenę albo subdomenę —</option><?php foreach ($this->domains as $domain => $label): ?><option value="<?php echo $e($domain); ?>" <?php echo $config['domain'] === $domain ? 'selected' : ''; ?>><?php echo $e($label); ?></option><?php endforeach; ?></select><small>Nie wpisujesz adresu ręcznie — zapobiega to konfiguracji nieistniejącego vhosta.</small></label><div class="kgt-generated-value kgt-span-2"><span>Wynikowy adres</span><strong data-kgt-public-preview><?php echo $e($this->publicUrl ?: 'https://wybrana-domena'); ?></strong><small>TLS pozostaje po stronie Pleska; manager dodaje reverse proxy przez API rozszerzeń.</small></div></div></article>
+
+        <article class="kgt-panel"><div class="kgt-panel-heading"><div><span class="kgt-kicker">02 · ŹRÓDŁO</span><h2>Repozytorium platformy</h2><p>To repozytorium zawiera kod KitsuneGIT Web instalowany na serwerze.</p></div></div><div class="kgt-form-grid"><label class="kgt-field kgt-span-2"><span>Adres repozytorium Git</span><input type="text" name="repositoryUrl" value="<?php echo $e($config['repositoryUrl']); ?>" required placeholder="https://github.com/firma/kitsune-git.git"><small>HTTPS dla repozytorium publicznego lub tokenu; <code>git@host:owner/repo.git</code> dla deployment key.</small></label><label class="kgt-field"><span>Gałąź wdrożeniowa</span><input type="text" name="repositoryBranch" value="<?php echo $e($config['repositoryBranch']); ?>" required placeholder="main"><small>Manager wdraża dokładnie wskazaną gałąź.</small></label><label class="kgt-field"><span>Sposób dostępu</span><select name="gitAuthMode" data-kgt-auth-mode><option value="public" <?php echo $config['gitAuthMode'] === 'public' ? 'selected' : ''; ?>>Publiczne repozytorium HTTPS</option><option value="token" <?php echo $config['gitAuthMode'] === 'token' ? 'selected' : ''; ?>>Prywatne HTTPS + token</option><option value="generated-key" <?php echo $config['gitAuthMode'] === 'generated-key' ? 'selected' : ''; ?>>SSH + klucz generowany przez manager</option><option value="custom-key" <?php echo $config['gitAuthMode'] === 'custom-key' ? 'selected' : ''; ?>>SSH + własny klucz prywatny</option></select><small>Poświadczenia nigdy nie są dopisywane do URL-a ani logów.</small></label></div></article>
+
+        <article class="kgt-panel" data-kgt-auth-panel><div class="kgt-panel-heading"><div><span class="kgt-kicker">03 · POŚWIADCZENIA</span><h2>Dostęp tylko do odczytu kodu źródłowego</h2><p>Puste pole sekretu zachowuje zapisaną, zaszyfrowaną wartość.</p></div></div><div class="kgt-form-grid"><label class="kgt-field" data-kgt-token-field><span>Użytkownik HTTPS</span><input type="text" name="gitUsername" value="<?php echo $e($config['gitUsername']); ?>" placeholder="x-access-token"><small>Zwykle <code>x-access-token</code> albo nazwa konta Git.</small></label><label class="kgt-field" data-kgt-token-field><span>Token Git <?php echo $this->hasGitToken ? '· zapisany' : '· brak'; ?></span><input type="password" name="gitToken" value="" autocomplete="new-password" placeholder="<?php echo $this->hasGitToken ? 'Puste pole zachowa token' : 'Token tylko do odczytu'; ?>"><small><label class="kgt-inline-check"><input type="checkbox" name="clearGitToken" value="1"> Wyczyść zapisany token</label></small></label><label class="kgt-field kgt-span-2" data-kgt-ssh-field><span>Przypięte SSH known_hosts (opcjonalne)</span><textarea name="gitSshKnownHosts" rows="4" placeholder="github.com ssh-ed25519 AAAA..."><?php echo $e($config['gitSshKnownHosts']); ?></textarea><small>Puste pole włącza automatyczne trust-on-first-use. W produkcji najlepiej wkleić zweryfikowany klucz hosta.</small></label><label class="kgt-field kgt-span-2" data-kgt-custom-key-field><span>Własny prywatny klucz SSH <?php echo $this->hasCustomSshKey ? '· zapisany' : '· brak'; ?></span><textarea name="gitSshPrivateKey" rows="6" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea><small>Pole jest używane tylko w trybie „własny klucz”. <label class="kgt-inline-check"><input type="checkbox" name="clearGitSshPrivateKey" value="1"> Wyczyść zapisany klucz</label></small></label></div></article>
+
+        <details class="kgt-panel kgt-advanced"><summary><span><b>Ustawienia zaawansowane</b><small>Ścieżki, proces systemowy, porty i limit LFS</small></span><i>⌄</i></summary><div class="kgt-form-grid"><label class="kgt-field"><span>Katalog kodu</span><input type="text" name="appRoot" value="<?php echo $e($config['appRoot']); ?>" required><small>Aktualizowany atomowo; poprzednia wersja służy do rollbacku.</small></label><label class="kgt-field"><span>Katalog danych trwałych</span><input type="text" name="dataRoot" value="<?php echo $e($config['dataRoot']); ?>" required><small>Musi znajdować się poza katalogiem kodu.</small></label><label class="kgt-field"><span>Wewnętrzny port HTTP</span><input type="number" name="appPort" min="1024" max="65534" value="<?php echo $e($config['appPort']); ?>" required><small>Dostępny wyłącznie przez loopback i vhost Pleska.</small></label><label class="kgt-field"><span>Publiczny port Git SSH</span><input type="number" name="sshPort" min="1024" max="65535" value="<?php echo $e($config['sshPort']); ?>" required><small>Otwórz ten port w zaporze serwera.</small></label><label class="kgt-field"><span>Użytkownik usługi</span><input type="text" name="serviceUser" value="<?php echo $e($config['serviceUser']); ?>" required><small>Musi już istnieć w systemie. Domyślnie <code>psaadm</code>.</small></label><label class="kgt-field"><span>Limit pojedynczego obiektu LFS (B)</span><input type="number" name="lfsMaxObjectBytes" min="1048576" value="<?php echo $e($config['lfsMaxObjectBytes']); ?>" required><small>Domyślnie 10 GiB.</small></label></div></details>
+        <div class="kgt-sticky-save"><div><strong>Zapis nie pobiera jeszcze kodu.</strong><span>Przebuduje tylko wybraną domenę i przygotuje konfigurację wdrożenia.</span></div><button class="kgt-button kgt-button-primary" type="submit">Zapisz pełną konfigurację</button></div>
+      </form>
+    </section>
+
+  <?php elseif ($activeTab === 'access'): ?>
+    <section class="kgt-panel-stack">
+      <div class="kgt-two-columns">
+        <article class="kgt-panel"><div class="kgt-panel-heading"><div><span class="kgt-kicker">DEPLOYMENT KEY</span><h2>Klucz dostępu do repozytorium źródłowego</h2><p>Dodaj ten klucz jako read-only deploy key w GitHubie, GitLabie albo własnym serwerze Git. Klucz prywatny nigdy nie opuszcza Pleska.</p></div></div><?php if (!empty($deployKey['publicKey'])): ?><div class="kgt-secret-box"><code id="kgt-deploy-public-key"><?php echo $e($deployKey['publicKey']); ?></code><button type="button" data-kgt-copy="kgt-deploy-public-key">Kopiuj</button></div><dl class="kgt-facts"><div><dt>Fingerprint</dt><dd><code><?php echo $e($deployKey['fingerprint'] ?? '—'); ?></code></dd></div><div><dt>Wygenerowano</dt><dd><?php echo $e($dateLabel($deployKey['createdAt'] ?? null)); ?></dd></div></dl><?php else: ?><div class="kgt-empty"><strong>Klucz nie został jeszcze wygenerowany</strong><span>Jest potrzebny tylko dla prywatnego repozytorium SSH.</span></div><?php endif; ?><form method="post" data-kgt-confirm="Wygenerowanie nowego klucza unieważni poprzedni po jego usunięciu z hostingu Git. Kontynuować?"><input type="hidden" name="formType" value="operation"><input type="hidden" name="operation" value="generate-key"><input type="hidden" name="returnTab" value="access"><button class="kgt-button" type="submit"><?php echo !empty($deployKey['publicKey']) ? 'Wygeneruj nowy klucz' : 'Wygeneruj deployment key'; ?></button></form></article>
+        <article class="kgt-panel"><div class="kgt-panel-heading"><div><span class="kgt-kicker">ADMINISTRACJA PLATFORMĄ</span><h2>Token startowy Desktop / API</h2><p>Służy do pierwszej administracji i połączenia klienta desktopowego. Zwykli użytkownicy korzystają z własnych kont, tokenów i kluczy SSH.</p></div></div><?php if ($adminToken): ?><div class="kgt-secret-box"><input id="kgt-admin-token" type="password" readonly value="<?php echo $e($adminToken); ?>"><button type="button" data-kgt-reveal="kgt-admin-token">Pokaż</button><button type="button" data-kgt-copy-value="kgt-admin-token">Kopiuj</button></div><?php else: ?><div class="kgt-empty"><strong>Token powstanie podczas pierwszego wdrożenia</strong><span>Nie trzeba wymyślać go ręcznie.</span></div><?php endif; ?><form method="post" data-kgt-confirm="Po rotacji wszystkie integracje używające starego tokenu przestaną działać. Kontynuować?"><input type="hidden" name="formType" value="operation"><input type="hidden" name="operation" value="rotate-admin-token"><input type="hidden" name="returnTab" value="access"><button class="kgt-button kgt-button-danger" type="submit" <?php echo !$adminToken ? 'disabled' : ''; ?>>Obróć token administratora</button></form></article>
+      </div>
+      <article class="kgt-panel"><div class="kgt-panel-heading"><div><span class="kgt-kicker">KLUCZE UŻYTKOWNIKÓW</span><h2>Jak działa Git SSH po wdrożeniu</h2><p>Deployment key powyżej służy wyłącznie managerowi Pleska do pobierania kodu platformy. Klucze programistów są niezależne i dodaje się je do ich kont w KitsuneGIT.</p></div></div><div class="kgt-step-grid"><div><span>1</span><strong>Utwórz użytkownika</strong><small>Administrator zaprasza konto w panelu KitsuneGIT.</small></div><div><span>2</span><strong>Dodaj publiczny klucz SSH</strong><small>Użytkownik otwiera „SSH keys” i wkleja własny klucz <code>*.pub</code>.</small></div><div><span>3</span><strong>Klonuj lub wysyłaj</strong><small><code><?php echo $e(($this->sshUrl ?: 'ssh://git@host:2222') . '/namespace/project.git'); ?></code></small></div></div><?php if ($this->publicUrl): ?><a class="kgt-button" href="<?php echo $e($this->publicUrl); ?>" target="_blank" rel="noopener noreferrer">Otwórz panel kont i kluczy ↗</a><?php endif; ?></article>
+    </section>
+
+  <?php else: ?>
+    <section class="kgt-panel-stack">
+      <article class="kgt-panel"><div class="kgt-panel-heading"><div><span class="kgt-kicker">WYMAGANIA SERWERA</span><h2>Automatyczna kontrola środowiska</h2><p>Wdrożenie wymaga Node.js 22+, npm, Git, OpenSSH, curl, systemd i aktywnego vhosta Pleska.</p></div><button type="button" class="kgt-button" data-kgt-refresh>Sprawdź ponownie</button></div><div class="kgt-check-grid"><?php foreach ($prerequisites as $name => $check): ?><div class="<?php echo !empty($check['ok']) ? 'is-ok' : 'is-failed'; ?>"><i></i><span><strong><?php echo $e($name); ?></strong><small><?php echo $e($check['version'] ?? '—'); ?></small></span></div><?php endforeach; ?><?php if (!$prerequisites): ?><div class="is-failed"><i></i><span><strong>Brak wyniku</strong><small>Zapisz konfigurację i odśwież ekran.</small></span></div><?php endif; ?></div></article>
+      <div class="kgt-two-columns"><article class="kgt-panel"><div class="kgt-panel-heading"><div><span class="kgt-kicker">RUNTIME</span><h2>Rzeczywiste wartości procesu</h2></div></div><dl class="kgt-facts"><div><dt>Kod</dt><dd><code><?php echo $e($runtime['appRoot'] ?? $config['appRoot']); ?></code></dd></div><div><dt>Dane</dt><dd><code><?php echo $e($runtime['dataRoot'] ?? $config['dataRoot']); ?></code></dd></div><div><dt>Port HTTP</dt><dd><?php echo $e($runtime['appPort'] ?? $config['appPort']); ?></dd></div><div><dt>Port SSH</dt><dd><?php echo $e($runtime['sshPort'] ?? $config['sshPort']); ?></dd></div><div><dt>Ostatni sukces</dt><dd><?php echo $e($dateLabel($state['lastSuccess'] ?? null)); ?></dd></div><div><dt>Ostatnia operacja</dt><dd><?php echo $e($state['lastOperation'] ?? 'brak'); ?></dd></div></dl></article><article class="kgt-panel"><div class="kgt-panel-heading"><div><span class="kgt-kicker">ZASADY BEZPIECZEŃSTWA</span><h2>Co manager robi automatycznie</h2></div></div><ul class="kgt-security-list"><li>token Git i prywatny klucz są zaszyfrowane przez Pleska;</li><li>poświadczenia nie trafiają do URL-a, poleceń ani dziennika;</li><li>aktualizacja używa stagingu, healthchecku i rollbacku;</li><li>vhost powstaje przez hook, bez duplikowania bloków nginx;</li><li>dane użytkowników pozostają poza repozytorium kodu.</li></ul></article></div>
+      <article class="kgt-panel"><div class="kgt-panel-heading"><div><span class="kgt-kicker">DZIENNIK</span><h2>Ostatnie operacje managera</h2><p>Sekrety są maskowane; przechowywanych jest maksymalnie 250 wpisów.</p></div><button type="button" class="kgt-button" data-kgt-copy="kgt-log">Kopiuj dziennik</button></div><?php if (!empty($state['log'])): ?><pre id="kgt-log" class="kgt-log"><?php echo $e(implode("\n", array_slice((array) $state['log'], -250))); ?></pre><?php else: ?><div class="kgt-empty"><strong>Brak wpisów</strong><span>Uruchom sprawdzenie origin albo wdrożenie.</span></div><?php endif; ?></article>
+    </section>
+  <?php endif; ?>
 </main>
+<script src="<?php echo $e(pm_Context::getBaseUrl() . 'js/kitsune-git.js?v=' . $this->extensionVersion); ?>"></script>
