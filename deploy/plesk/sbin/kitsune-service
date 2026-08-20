@@ -476,7 +476,13 @@ final class KitsuneGitPleskManager
         $pipes = [];
         $baseEnvironment = getenv();
         if (!is_array($baseEnvironment)) $baseEnvironment = [];
-        $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, $cwd, array_merge($baseEnvironment, $environment), ['bypass_shell' => true]);
+        $processCommand = $command;
+        if (PHP_VERSION_ID < 70400) {
+            $processCommand = implode(' ', array_map(function ($argument) {
+                return escapeshellarg((string) $argument);
+            }, $command));
+        }
+        $process = proc_open($processCommand, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, $cwd, array_merge($baseEnvironment, $environment), ['bypass_shell' => true]);
         if (!is_resource($process)) throw new RuntimeException('Nie można uruchomić: ' . implode(' ', $command));
         fclose($pipes[0]);
         $stdout = stream_get_contents($pipes[1]);

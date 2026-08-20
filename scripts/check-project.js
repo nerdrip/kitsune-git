@@ -91,6 +91,14 @@ if (!extraResources.includes('build/runtime/${os}-${arch}') || !extraResources.i
 }
 if (!fs.existsSync(path.join(ROOT, 'THIRD_PARTY_NOTICES.md'))) fail('Missing third-party runtime notices');
 
+const pleskServiceSource = read('deploy/plesk/sbin/kitsune-service');
+if (/proc_open\(\$command\s*,/.test(pleskServiceSource)) {
+  fail('Plesk service passes an argument array directly to proc_open without a PHP < 7.4 fallback');
+}
+if (!/PHP_VERSION_ID\s*<\s*70400[\s\S]{0,300}escapeshellarg/.test(pleskServiceSource)) {
+  fail('Plesk service is missing shell-safe process argument handling for PHP < 7.4');
+}
+
 const workflowSource = read('.github/workflows/build-packages.yml');
 for (const runner of ['windows-latest', 'macos-15-intel', 'macos-15', 'ubuntu-24.04', 'ubuntu-24.04-arm']) {
   if (!workflowSource.includes(`os: ${runner}`)) fail(`Package workflow is missing runner: ${runner}`);
