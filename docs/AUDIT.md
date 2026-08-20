@@ -56,7 +56,7 @@ The review covered the Electron main/preload/renderer boundaries, Git command co
 
 - Updated Electron 33 to 43.2.0, electron-builder 25 to 26.15.3, electron-updater to 6.8.9, simple-git to 3.36.0, and cross-env to 10.1.0.
 - Pinned the fixed `js-yaml` 4.3.0 transitive version. `npm audit --omit=dev` reports zero production vulnerabilities.
-- Corrected the package-lock root version mismatch and declared the actual Node.js requirement (22.12.0+).
+- Corrected the package-lock root version mismatch and declared the actual Node.js requirement (22.13.0+ for unflagged `node:sqlite`).
 - Added dependency-free syntax/configuration/IPC/API/CSP/build-target checks.
 - Added built-in Node tests for validation plus real temporary-repository integration tests covering literal option-like paths, status, commits, diffs, root-log parsing, rename parsing, literal history search, destructive hash validation, and config filtering.
 

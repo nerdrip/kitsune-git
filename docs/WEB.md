@@ -4,7 +4,7 @@ KitsuneGIT Web is the server counterpart to the Electron desktop client. It is d
 
 ## Run locally
 
-Node.js 22+ and Git are required.
+Node.js 22.13+ and Git are required. Node 22.13 is the first Node 22 release that exposes the built-in SQLite module without an experimental flag.
 
 ```powershell
 $env:KITSUNE_ADMIN_TOKEN = node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))"
@@ -139,7 +139,7 @@ Open a repository in KitsuneGIT Desktop, choose **Advanced Repository Tools → 
 
 ## Plesk
 
-Run `npm run build:plesk`, then upload `dist/KitsuneGIT-Plesk-1.3.0.zip` in **Extensions**. The server must provide Linux, systemd, Node.js 22+, npm, Git, curl, tar, nginx, and an existing dedicated domain with a valid Plesk TLS certificate.
+Run `npm run build:plesk`, then upload the generated `dist/KitsuneGIT-Plesk-<version>-r<release>.zip` in **Extensions**. The server must provide Linux, systemd, Node.js 22.13+, npm, Git, curl, tar, nginx, and an existing dedicated domain with a valid Plesk TLS certificate.
 
 The extension verifies the release archive SHA-256, installs the unprivileged web service plus a separate loopback-only, HMAC-authenticated Plesk preview helper, generates administrator/encryption/preview secrets and an Ed25519 SSH host key, and adds a streaming nginx reverse proxy suitable for large Git pushes. The helper alone runs as root and accepts narrowly validated create/delete operations for managed subdomains. Preview routes proxy an application already deployed elsewhere; this is not a build or CI engine. Expired previews are removed automatically. The extension refuses to overwrite existing custom nginx directives and preserves repositories in `/var/lib/kitsune-git` on removal.
 

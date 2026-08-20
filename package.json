@@ -13,6 +13,7 @@
     "web:backup": "node src/server/backup-cli.js create",
     "web:restore": "node src/server/backup-cli.js restore",
     "web:migrate-sqlite": "node src/server/metadata-cli.js migrate-to-sqlite",
+    "build:server": "node scripts/build-server-package.js",
     "build:plesk": "node scripts/build-plesk-extension.js",
     "check": "node scripts/check-project.js",
     "test": "node --test",
@@ -157,7 +158,7 @@
   },
   "homepage": "https://github.com/nerdrip/kitsune-git#readme",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
   },
   "devDependencies": {
     "cross-env": "^10.1.0",
