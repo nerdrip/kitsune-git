@@ -2,6 +2,18 @@
 
 class IndexController extends pm_Controller_Action
 {
+    public function init()
+    {
+        parent::init();
+        $this->view->pageTitle = 'KitsuneGIT Web';
+        $this->view->headLink()->appendStylesheet(pm_Context::getBaseUrl() . 'css/kitsune-platform.css?v=1');
+        $this->view->headScript()->appendFile(pm_Context::getBaseUrl() . 'js/kitsune-platform.js?v=1');
+        $this->view->suiteProduct = 'KitsuneGIT Web';
+        $this->view->suiteVersion = '1.3.0';
+        try { $this->view->suiteHubActive = pm_Extension::getById('kitsuneserv-bridge')->isActive(); }
+        catch (Throwable $exception) { $this->view->suiteHubActive = false; }
+    }
+
     public function indexAction()
     {
         if (!pm_Session::getClient()->isAdmin()) {
