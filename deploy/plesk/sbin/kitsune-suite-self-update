@@ -1,0 +1,234 @@
+#!/usr/bin/env php
+<?php
+
+const KITSUNE_SELF_UPDATE_SOURCES = [
+    'kitsuneartifactory-manager' => 'tools/plesk-extension/kitsuneartifactory-manager',
+    'kitsuneirc-manager' => 'tools/plesk-extension/kitsuneirc-manager',
+    'kitsunecolab-manager' => 'tools/plesk-extension/kitsunecolab-manager',
+    'kitsunepaint-manager' => 'tools/plesk-extension/kitsunepaint-manager',
+    'kitsunepnc-manager' => 'tools/plesk-extension/kitsunepnc-manager',
+    'kitsunetab-manager' => 'tools/plesk-extension/kitsunetab-manager',
+    'kitsunetest-manager' => 'tools/plesk-extension/kitsunetest-manager',
+    'nailit-manager' => 'tools/plesk-extension/nailit-manager',
+    'kitsune-git' => 'deploy/plesk',
+    'wpkit-parse-manager' => 'tools/plesk-extension/wpkit-parse-manager',
+    'nerd-apps-runtime-manager' => 'tools/plesk-extension/nerd-apps-runtime-manager',
+    'ultimate-tool' => 'plesk-extension',
+    'kitsuneserv-bridge' => 'plesk-extension/kitsuneserv-bridge',
+];
+
+final class KitsuneRepositorySelfUpdateRunner
+{
+    private $mode;
+    private $config;
+    private $varDir;
+    private $repository;
+    private $temporary = [];
+
+    public function __construct($mode, $configPath)
+    {
+        if (!in_array($mode, ['--check', '--install'], true)) throw new RuntimeException('Nieobsługiwana operacja aktualizacji.');
+        $real = realpath((string) $configPath);
+        $normalized = $real === false ? '' : str_replace('\\', '/', $real);
+        if ($real === false || !preg_match('#/var/modules/[a-z0-9._-]+/self-update-[a-f0-9]{24}\.json$#', $normalized) || !is_file($real) || is_link($real)) throw new RuntimeException('Nieprawidłowa ścieżka konfiguracji aktualizacji.');
+        $permissions = fileperms($real);
+        if ($permissions !== false && (($permissions & 0077) !== 0)) throw new RuntimeException('Konfiguracja aktualizacji musi mieć tryb 0600.');
+        $decoded = json_decode((string) file_get_contents($real), true);
+        if (!is_array($decoded) || (int) ($decoded['schemaVersion'] ?? 0) !== 1) throw new RuntimeException('Nieprawidłowa konfiguracja aktualizacji.');
+        $id = (string) ($decoded['extensionId'] ?? '');
+        if (!isset(KITSUNE_SELF_UPDATE_SOURCES[$id]) || (string) ($decoded['extensionSource'] ?? '') !== KITSUNE_SELF_UPDATE_SOURCES[$id]) throw new RuntimeException('Nieznane źródło rozszerzenia.');
+        $url = trim((string) ($decoded['repositoryUrl'] ?? ''));
+        $branch = trim((string) ($decoded['repositoryBranch'] ?? ''));
+        if (!preg_match('/^(https:\/\/|ssh:\/\/|git@)[^\s\0]+$/', $url) || !preg_match('/^(?![-.])(?!.*\.\.)(?!.*@\{)[A-Za-z0-9._\/-]+$/', $branch)) throw new RuntimeException('Nieprawidłowy adres lub gałąź repozytorium.');
+        $this->mode = $mode;
+        $this->config = $decoded;
+        $this->varDir = dirname($real);
+        $root = $this->varDir . '/suite-self-update';
+        $this->ensureDirectory($root, 0700);
+        if (is_link($root)) throw new RuntimeException('Katalog aktualizacji nie może być dowiązaniem symbolicznym.');
+        $this->repository = $root . '/' . $id;
+    }
+
+    public function execute()
+    {
+        try {
+            if ((string) $this->config['extensionId'] === 'ultimate-tool') {
+                $this->executeUltimateTool();
+                return;
+            }
+            $this->synchronize();
+            $metadata = $this->metadata();
+            if ($this->mode === '--install') $metadata = $this->install($metadata);
+            fwrite(STDOUT, 'KITSUNE_SELF_UPDATE_RESULT=' . json_encode($metadata, JSON_UNESCAPED_SLASHES) . PHP_EOL);
+        } finally {
+            foreach ($this->temporary as $path) if (is_file($path)) @unlink($path);
+        }
+    }
+
+    private function executeUltimateTool()
+    {
+        $key = trim((string) ($this->config['gitSshPrivateKey'] ?? ''));
+        if ($key === '') throw new RuntimeException('Aktualizacja Ultimate Tool z repozytorium wymaga prywatnego klucza SSH.');
+        $uuid = $this->uuid();
+        $directory = $this->pleskRoot() . '/var/modules/ultimate-tool';
+        $this->ensureDirectory($directory, 0700);
+        $config = $directory . '/extension-update-' . $uuid . '.json';
+        $payload = json_encode(['operationUuid' => $uuid, 'privateKey' => $key . "\n", 'repositoryRef' => (string) $this->config['repositoryBranch'], 'repositoryUrl' => (string) $this->config['repositoryUrl']], JSON_UNESCAPED_SLASHES);
+        if ($payload === false || file_put_contents($config, $payload, LOCK_EX) === false) throw new RuntimeException('Nie można przygotować aktualizacji Ultimate Tool.');
+        @chmod($config, 0600);
+        $manager = $this->pleskRoot() . '/admin/sbin/modules/ultimate-tool/ultimate-tool-manager';
+        if (!is_file($manager) || !is_executable($manager)) throw new RuntimeException('Runner repozytoryjny Ultimate Tool jest niedostępny.');
+        $result = $this->run([$manager, $this->mode === '--install' ? '--extension-update' : '--extension-status', $config]);
+        $decoded = json_decode(trim((string) $result['stdout']), true);
+        if (!is_array($decoded)) throw new RuntimeException('Runner Ultimate Tool nie zwrócił metadanych.');
+        $metadata = ['id' => 'ultimate-tool', 'name' => 'Ultimate Tool', 'version' => (string) ($decoded['remoteVersion'] ?? ''), 'release' => (string) ($decoded['remoteRelease'] ?? ''), 'branch' => (string) $this->config['repositoryBranch'], 'commit' => (string) ($decoded['commit'] ?? '')];
+        if (!preg_match('/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/', $metadata['version']) || !preg_match('/^[1-9]\d{0,8}$/', $metadata['release']) || !preg_match('/^[a-f0-9]{40,64}$/', $metadata['commit'])) throw new RuntimeException('Runner Ultimate Tool zwrócił nieprawidłowe metadane.');
+        fwrite(STDOUT, 'KITSUNE_SELF_UPDATE_RESULT=' . json_encode($metadata, JSON_UNESCAPED_SLASHES) . PHP_EOL);
+    }
+
+    private function synchronize()
+    {
+        $url = (string) $this->config['repositoryUrl'];
+        $branch = (string) $this->config['repositoryBranch'];
+        $environment = $this->gitEnvironment();
+        if (!is_dir($this->repository . '/.git')) {
+            if (file_exists($this->repository) && count(scandir($this->repository) ?: []) > 2) throw new RuntimeException('Prywatny katalog repozytorium aktualizacji nie jest pusty.');
+            $this->run(['git', 'clone', '--branch', $branch, '--single-branch', '--', $url, $this->repository], null, $environment);
+            return;
+        }
+        if (is_link($this->repository)) throw new RuntimeException('Repozytorium aktualizacji nie może być dowiązaniem symbolicznym.');
+        $origin = trim((string) $this->run(['git', 'remote', 'get-url', 'origin'], $this->repository, $environment)['stdout']);
+        if (!hash_equals($url, $origin)) throw new RuntimeException('Checkout aktualizacji ma inny adres origin.');
+        $dirty = trim((string) $this->run(['git', 'status', '--porcelain'], $this->repository, $environment)['stdout']);
+        if ($dirty !== '') throw new RuntimeException('Checkout aktualizacji zawiera lokalne zmiany.');
+        $remote = 'refs/remotes/origin/' . $branch;
+        $this->run(['git', 'fetch', '--prune', 'origin', '+refs/heads/' . $branch . ':' . $remote], $this->repository, $environment);
+        $this->run(['git', 'checkout', '-B', $branch, $remote], $this->repository, $environment);
+        $this->run(['git', 'merge', '--ff-only', $remote], $this->repository, $environment);
+    }
+
+    private function metadata()
+    {
+        $source = (string) $this->config['extensionSource'];
+        $root = realpath($this->repository);
+        $path = realpath($this->repository . '/' . $source . '/meta.xml');
+        if ($root === false || $path === false || strpos($path, $root . DIRECTORY_SEPARATOR) !== 0 || !is_file($path) || is_link($path)) throw new RuntimeException('Repozytorium nie zawiera ' . $source . '/meta.xml.');
+        $meta = $this->parseMetadata((string) file_get_contents($path));
+        $commit = strtolower(trim((string) $this->run(['git', 'rev-parse', 'HEAD'], $this->repository)['stdout']));
+        if (!preg_match('/^[a-f0-9]{40,64}$/', $commit)) throw new RuntimeException('Nie można przypiąć commitu aktualizacji.');
+        return ['id' => $meta['id'], 'name' => $meta['name'], 'version' => $meta['version'], 'release' => $meta['release'], 'branch' => (string) $this->config['repositoryBranch'], 'commit' => $commit];
+    }
+
+    private function install(array $candidate)
+    {
+        $installedPath = $this->pleskRoot() . '/admin/plib/modules/' . $candidate['id'] . '/meta.xml';
+        $installed = $this->parseMetadataFile($installedPath);
+        $comparison = version_compare($candidate['version'], $installed['version']);
+        if ($comparison < 0 || ($comparison === 0 && (int) $candidate['release'] <= (int) $installed['release'])) throw new RuntimeException('Zainstalowana wersja rozszerzenia jest już aktualna.');
+        $artifact = $this->varDir . '/self-update-' . bin2hex(random_bytes(12)) . '.zip';
+        try {
+            $this->run(['git', 'archive', '--format=zip', '--output', $artifact, 'HEAD:' . (string) $this->config['extensionSource']], $this->repository);
+            @chmod($artifact, 0600);
+            $packaged = $this->inspectArchive($artifact);
+            foreach (['id', 'version', 'release'] as $field) if ((string) $packaged[$field] !== (string) $candidate[$field]) throw new RuntimeException('Paczka repozytoryjna nie odpowiada meta.xml (' . $field . ').');
+            $extension = $this->pleskRoot() . '/bin/extension';
+            if (!is_file($extension) || !is_executable($extension)) throw new RuntimeException('Plesk extension CLI jest niedostępne.');
+            $previous = umask(0022);
+            try { $this->run([$extension, '-g', $artifact]); } finally { umask($previous); }
+            $this->run([$extension, '--enable', $candidate['id']]);
+            $updated = $this->parseMetadataFile($installedPath);
+            foreach (['id', 'version', 'release'] as $field) if ((string) $updated[$field] !== (string) $candidate[$field]) throw new RuntimeException('Plesk nie zainstalował oczekiwanego wydania (' . $field . ').');
+            return array_merge($candidate, ['name' => $updated['name']]);
+        } finally {
+            if (is_file($artifact)) @unlink($artifact);
+        }
+    }
+
+    private function inspectArchive($artifact)
+    {
+        $listing = preg_split('/\r?\n/', trim((string) $this->run(['unzip', '-Z1', $artifact])['stdout']), -1, PREG_SPLIT_NO_EMPTY);
+        if (!$listing || count($listing) > 10000) throw new RuntimeException('Nieprawidłowy katalog ZIP aktualizacji.');
+        $metaFound = false;
+        foreach ($listing as $entry) {
+            $entry = preg_replace('#^(?:\./)+#', '', str_replace('\\', '/', (string) $entry));
+            if ($entry === '' || $entry[0] === '/' || preg_match('#(^|/)\.\.(/|$)#', $entry) || strpos($entry, "\0") !== false) throw new RuntimeException('Paczka zawiera niebezpieczną ścieżkę.');
+            if ($entry === 'meta.xml') $metaFound = true;
+        }
+        if (!$metaFound) throw new RuntimeException('Paczka nie zawiera meta.xml w katalogu głównym.');
+        return $this->parseMetadata((string) $this->run(['unzip', '-p', $artifact, 'meta.xml'])['stdout']);
+    }
+
+    private function parseMetadataFile($path)
+    {
+        if (!is_file($path) || is_link($path)) throw new RuntimeException('Nie można odczytać zainstalowanego meta.xml.');
+        return $this->parseMetadata((string) file_get_contents($path));
+    }
+
+    private function parseMetadata($raw)
+    {
+        if ($raw === '' || strlen($raw) > 65536) throw new RuntimeException('Nieprawidłowy rozmiar meta.xml.');
+        $previous = libxml_use_internal_errors(true);
+        try { $xml = simplexml_load_string($raw, 'SimpleXMLElement', LIBXML_NONET); }
+        finally { libxml_clear_errors(); libxml_use_internal_errors($previous); }
+        $id = $xml ? trim((string) $xml->id) : '';
+        $name = $xml ? trim((string) $xml->name) : '';
+        $version = $xml ? trim((string) $xml->version) : '';
+        $release = $xml ? trim((string) $xml->release) : '';
+        if ($id !== (string) $this->config['extensionId'] || $name === '' || !preg_match('/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/', $version) || !preg_match('/^[1-9]\d{0,8}$/', $release)) throw new RuntimeException('Nieprawidłowe metadane rozszerzenia w repozytorium.');
+        return ['id' => $id, 'name' => $name, 'version' => $version, 'release' => $release];
+    }
+
+    private function gitEnvironment()
+    {
+        $environment = ['GIT_TERMINAL_PROMPT' => '0'];
+        $url = (string) $this->config['repositoryUrl'];
+        $token = (string) ($this->config['gitToken'] ?? '');
+        $key = trim((string) ($this->config['gitSshPrivateKey'] ?? ''));
+        if ($token !== '' && strpos($url, 'https://') === 0) {
+            $askpass = $this->temporaryFile('askpass', "#!/bin/sh\ncase \"\$1\" in *Username*) printf '%s\\n' \"\$KITSUNE_GIT_USERNAME\" ;; *) printf '%s\\n' \"\$KITSUNE_GIT_TOKEN\" ;; esac\n", 0700);
+            $environment['GIT_ASKPASS'] = $askpass; $environment['GIT_USERNAME'] = (string) ($this->config['gitUsername'] ?? 'x-access-token'); $environment['KITSUNE_GIT_USERNAME'] = $environment['GIT_USERNAME']; $environment['KITSUNE_GIT_TOKEN'] = $token;
+        }
+        if ($key !== '') {
+            $known = trim((string) ($this->config['gitSshKnownHosts'] ?? ''));
+            if ($known === '') throw new RuntimeException('Repozytorium SSH wymaga zapisanego known_hosts.');
+            $keyPath = $this->temporaryFile('key', $key . "\n", 0600);
+            $hostsPath = $this->temporaryFile('known-hosts', $known . "\n", 0600);
+            $environment['GIT_SSH_COMMAND'] = 'ssh -i ' . escapeshellarg($keyPath) . ' -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=' . escapeshellarg($hostsPath);
+        }
+        return $environment;
+    }
+
+    private function temporaryFile($label, $contents, $mode)
+    {
+        $path = $this->varDir . '/self-update-' . $label . '-' . bin2hex(random_bytes(8));
+        if (file_put_contents($path, $contents, LOCK_EX) === false) throw new RuntimeException('Nie można przygotować uwierzytelniania Git.');
+        @chmod($path, $mode); $this->temporary[] = $path; return $path;
+    }
+
+    private function run(array $command, $cwd = null, array $extra = [])
+    {
+        $line = implode(' ', array_map('escapeshellarg', array_map('strval', $command)));
+        $environment = getenv(); if (!is_array($environment)) $environment = [];
+        $environment['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+        foreach ($extra as $key => $value) $environment[$key] = (string) $value;
+        $process = proc_open($line, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $cwd, $environment);
+        if (!is_resource($process)) throw new RuntimeException('Nie można uruchomić ' . $command[0] . '.');
+        fclose($pipes[0]); $stdout = stream_get_contents($pipes[1]); $stderr = stream_get_contents($pipes[2]); fclose($pipes[1]); fclose($pipes[2]); $code = proc_close($process);
+        if ($code !== 0) throw new RuntimeException($command[0] . ' failed (' . $code . '): ' . mb_substr(trim($stderr !== '' ? $stderr : $stdout), -3000));
+        return ['stdout' => $stdout, 'stderr' => $stderr, 'code' => $code];
+    }
+
+    private function ensureDirectory($path, $mode) { if (!is_dir($path) && !mkdir($path, $mode, true) && !is_dir($path)) throw new RuntimeException('Nie można utworzyć katalogu aktualizacji.'); @chmod($path, $mode); }
+    private function pleskRoot() { $root = dirname(__DIR__, 4); return is_dir($root . '/admin') ? $root : '/usr/local/psa'; }
+    private function uuid() { $bytes = random_bytes(16); $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40); $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80); $hex = bin2hex($bytes); return substr($hex, 0, 8) . '-' . substr($hex, 8, 4) . '-' . substr($hex, 12, 4) . '-' . substr($hex, 16, 4) . '-' . substr($hex, 20); }
+}
+
+umask(0077);
+try {
+    if ($argc !== 3) throw new RuntimeException('Użycie: kitsune-suite-self-update --check|--install /secure/config.json');
+    (new KitsuneRepositorySelfUpdateRunner((string) $argv[1], (string) $argv[2]))->execute();
+    exit(0);
+} catch (Throwable $exception) {
+    fwrite(STDERR, 'Kitsune Suite: ' . $exception->getMessage() . PHP_EOL);
+    exit(1);
+}

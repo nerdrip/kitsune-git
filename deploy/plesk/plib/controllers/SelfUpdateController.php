@@ -18,6 +18,7 @@ class SelfUpdateController extends pm_Controller_Action
         $installed = KitsuneSuiteSelfUpdate::installed();
         $this->view->installed = $installed;
         $this->view->updateState = KitsuneSuiteSelfUpdate::state();
+        $this->view->updateSource = KitsuneSuiteSelfUpdate::source();
         $this->view->suiteHubActive = $this->hubActive();
         $this->view->pluginUrl = '/modules/' . rawurlencode($installed['id']) . '/index.php/index/index';
     }
@@ -38,7 +39,7 @@ class SelfUpdateController extends pm_Controller_Action
         $this->requirePostAdmin();
         try {
             $state = KitsuneSuiteSelfUpdate::update();
-            $this->_status->addMessage('info', 'Zaktualizowano rozszerzenie do ' . $state['installedVersion'] . '-r' . $state['installedRelease'] . '. Paczka i SHA-256 są zgodne z repozytorium.');
+            $this->_status->addMessage('info', 'Zaktualizowano rozszerzenie do ' . $state['installedVersion'] . '-r' . $state['installedRelease'] . '. Paczka została zbudowana i zweryfikowana z przypiętego commitu repozytorium.');
         } catch (Throwable $exception) { $this->_status->addMessage('error', 'Nie zaktualizowano rozszerzenia: ' . $exception->getMessage()); }
         $this->_helper->redirector('index', 'self-update');
     }

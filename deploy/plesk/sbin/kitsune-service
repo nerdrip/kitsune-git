@@ -17,6 +17,8 @@ final class KitsuneGitPleskManager
     private $stateOwner = null;
     private $stateGroup = null;
     private $temporaryPaths = [];
+    private $nodeRuntimeResolved = false;
+    private $nodeRuntime = null;
 
     public function execute(array $arguments)
     {
@@ -147,7 +149,10 @@ final class KitsuneGitPleskManager
             if (!is_file($staging . '/package.json') || !is_file($staging . '/src/server/cli.js') || !is_file($staging . '/src/server/plesk-preview-helper.js')) throw new RuntimeException('Repozytorium nie zawiera kompletnej platformy KitsuneGIT Web.');
             $package = json_decode((string) file_get_contents($staging . '/package.json'), true);
             if (!is_array($package) || ($package['name'] ?? '') !== 'kitsune-git') throw new RuntimeException('Repozytorium nie jest projektem kitsune-git.');
-            $this->run(['npm', 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], [], $staging);
+            $runtime = $this->resolveNodeRuntime();
+            if ($runtime === null || $runtime['npm'] === null) throw new RuntimeException('Nie można przygotować polecenia npm dla wykrytego Node.js.');
+            $this->run(array_merge([$runtime['node'], $runtime['npm']], ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund']), $this->nodeEnvironment($runtime), $staging);
+            $this->normalizeApplicationPermissions($staging);
 
             $this->preparePersistentData();
             $this->writeEnvironment();
@@ -314,6 +319,18 @@ final class KitsuneGitPleskManager
         $this->run(['chown', '-R', $this->config['serviceUser'] . ':' . $group, $this->config['dataRoot']]);
     }
 
+    private function normalizeApplicationPermissions($root)
+    {
+        if (!is_dir($root) || is_link($root)) throw new RuntimeException('Nie można przygotować uprawnień katalogu aplikacji.');
+        if (!chmod($root, 0755)) throw new RuntimeException('Nie można udostępnić katalogu aplikacji użytkownikowi usługi.');
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
+        foreach ($iterator as $item) {
+            if ($item->isLink()) continue;
+            $mode = $item->isDir() || ($item->getPerms() & 0111) ? 0755 : 0644;
+            if (!@chmod($item->getPathname(), $mode)) throw new RuntimeException('Nie można ustawić bezpiecznych uprawnień kodu aplikacji.');
+        }
+    }
+
     private function writeEnvironment()
     {
         $values = $this->readEnvironment();
@@ -366,8 +383,12 @@ final class KitsuneGitPleskManager
         $data = $this->config['dataRoot'];
         $user = $this->config['serviceUser'];
         $group = trim($this->run(['id', '-gn', $user])['stdout']);
-        $service = "[Unit]\nDescription=KitsuneGIT Web\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser={$user}\nGroup={$group}\nEnvironmentFile=" . self::ENV_FILE . "\nWorkingDirectory={$app}\nExecStart=/usr/bin/env node {$app}/src/server/cli.js\nRestart=on-failure\nRestartSec=5\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths={$data}\n\n[Install]\nWantedBy=multi-user.target\n";
-        $preview = "[Unit]\nDescription=KitsuneGIT Plesk Preview Provisioner\nAfter=network.target\n\n[Service]\nType=simple\nUser=root\nGroup=root\nEnvironmentFile=" . self::ENV_FILE . "\nWorkingDirectory={$app}\nExecStart=/usr/bin/env node {$app}/src/server/plesk-preview-helper.js\nRestart=on-failure\nRestartSec=5\nPrivateTmp=true\nProtectHome=true\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\n\n[Install]\nWantedBy=multi-user.target\n";
+        $runtime = $this->resolveNodeRuntime();
+        if ($runtime === null) throw new RuntimeException('Nie można zapisać usług bez wykrytego Node.js.');
+        $node = $runtime['node'];
+        $runtimePath = dirname($node) . ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+        $service = "[Unit]\nDescription=KitsuneGIT Web\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser={$user}\nGroup={$group}\nEnvironment=PATH={$runtimePath}\nEnvironmentFile=" . self::ENV_FILE . "\nWorkingDirectory={$app}\nExecStart={$node} {$app}/src/server/cli.js\nRestart=on-failure\nRestartSec=5\nUMask=0027\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths={$data}\nSyslogIdentifier=kitsune-git\n\n[Install]\nWantedBy=multi-user.target\n";
+        $preview = "[Unit]\nDescription=KitsuneGIT Plesk Preview Provisioner\nAfter=network.target\n\n[Service]\nType=simple\nUser=root\nGroup=root\nEnvironment=PATH={$runtimePath}\nEnvironmentFile=" . self::ENV_FILE . "\nWorkingDirectory={$app}\nExecStart={$node} {$app}/src/server/plesk-preview-helper.js\nRestart=on-failure\nRestartSec=5\nUMask=0027\nPrivateTmp=true\nProtectHome=true\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\nSyslogIdentifier=kitsune-git-preview\n\n[Install]\nWantedBy=multi-user.target\n";
         $this->writeSecureFile(self::SERVICE_FILE, $service, 0644);
         $this->writeSecureFile(self::PREVIEW_SERVICE_FILE, $preview, 0644);
     }
@@ -376,13 +397,26 @@ final class KitsuneGitPleskManager
     {
         $url = 'http://127.0.0.1:' . $this->config['appPort'] . '/api/v1/ready';
         $last = '';
-        for ($attempt = 0; $attempt < 30; $attempt++) {
+        for ($attempt = 0; $attempt < 60; $attempt++) {
             $result = $this->run(['curl', '--silent', '--show-error', '--fail', '--max-time', '2', $url], [], null, true);
             $last = trim($result['stderr'] . ' ' . $result['stdout']);
             if ($result['code'] === 0 && strpos($result['stdout'], '"status":"ready"') !== false) return;
             usleep(500000);
         }
-        throw new RuntimeException('Healthcheck /api/v1/ready nie potwierdził gotowości: ' . substr($last, -500));
+        $diagnostics = $this->serviceDiagnostics();
+        throw new RuntimeException('Healthcheck /api/v1/ready nie potwierdził gotowości: ' . substr($last, -500) . ($diagnostics !== '' ? "\n\nStan usług i ostatnie logi:\n" . $diagnostics : ''));
+    }
+
+    private function serviceDiagnostics()
+    {
+        $parts = [];
+        foreach (['kitsune-git.service', 'kitsune-git-preview.service'] as $unit) {
+            $state = $this->run(['systemctl', 'show', $unit, '--no-pager', '--property=ActiveState', '--property=SubState', '--property=Result', '--property=ExecMainCode', '--property=ExecMainStatus'], [], null, true);
+            $journal = $this->run(['journalctl', '--unit', $unit, '--no-pager', '--lines', '30', '--output=cat'], [], null, true);
+            $detail = trim($state['stdout'] . "\n" . $journal['stdout'] . "\n" . $journal['stderr']);
+            if ($detail !== '') $parts[] = '[' . $unit . "]\n" . $detail;
+        }
+        return substr($this->safeMessage(implode("\n\n", $parts)), -3500);
     }
 
     private function collectStatus($includeCredentials)
@@ -399,6 +433,8 @@ final class KitsuneGitPleskManager
             'domain' => $this->config['domain'], 'publicUrl' => $this->config['domain'] !== '' ? 'https://' . $this->config['domain'] : '', 'sshPort' => $this->config['sshPort'],
             'appPort' => $this->config['appPort'], 'appRoot' => $this->config['appRoot'], 'dataRoot' => $this->config['dataRoot'],
         ]);
+        $nodeRuntime = $this->resolveNodeRuntime();
+        if ($nodeRuntime !== null) $this->state['runtime']['nodePath'] = $nodeRuntime['node'];
         $local = $this->localCommit();
         if ($local) $this->state['repository']['localCommit'] = $local;
         $this->saveState();
@@ -413,9 +449,26 @@ final class KitsuneGitPleskManager
     private function prerequisiteStatus()
     {
         $checks = [];
+        $runtime = $this->resolveNodeRuntime();
+        if ($runtime === null) {
+            $checks['node'] = ['ok' => false, 'version' => 'nie znaleziono w PATH ani /opt/plesk/node'];
+            $checks['npm'] = ['ok' => false, 'version' => 'niedostępne'];
+        } else {
+            $nodeResult = $this->run([$runtime['node'], '--version'], $this->nodeEnvironment($runtime), null, true);
+            $nodeDetail = trim($nodeResult['stdout'] !== '' ? $nodeResult['stdout'] : $nodeResult['stderr']);
+            $nodeParts = array_map('intval', explode('.', ltrim($runtime['version'], 'v')));
+            $nodeSupported = ($nodeParts[0] ?? 0) > 22 || (($nodeParts[0] ?? 0) === 22 && ($nodeParts[1] ?? 0) >= 13);
+            $checks['node'] = ['ok' => $nodeResult['code'] === 0 && $nodeSupported, 'version' => (strtok($nodeDetail, "\r\n") ?: $runtime['version']) . ' · ' . $runtime['node']];
+            if ($runtime['npm'] === null) {
+                $checks['npm'] = ['ok' => false, 'version' => 'brak npm dla ' . $runtime['node']];
+            } else {
+                $npmResult = $this->run([$runtime['node'], $runtime['npm'], '--version'], $this->nodeEnvironment($runtime), null, true);
+                $npmDetail = trim($npmResult['stdout'] !== '' ? $npmResult['stdout'] : $npmResult['stderr']);
+                $checks['npm'] = ['ok' => $npmResult['code'] === 0, 'version' => (strtok($npmDetail, "\r\n") ?: 'niedostępne') . ' · ' . $runtime['npm']];
+            }
+        }
         foreach ([
-            'node' => ['node', '--version'], 'npm' => ['npm', '--version'], 'git' => ['git', '--version'],
-            'ssh' => ['ssh', '-V'], 'curl' => ['curl', '--version'], 'systemd' => ['systemctl', '--version'],
+            'git' => ['git', '--version'], 'ssh' => ['ssh', '-V'], 'curl' => ['curl', '--version'], 'systemd' => ['systemctl', '--version'],
         ] as $name => $command) {
             $result = $this->run($command, [], null, true);
             $detail = trim($result['stdout'] !== '' ? $result['stdout'] : $result['stderr']);
@@ -431,12 +484,67 @@ final class KitsuneGitPleskManager
         $checks = $this->prerequisiteStatus();
         foreach (['git', 'ssh', 'curl', 'systemd'] as $name) if (empty($checks[$name]['ok'])) throw new RuntimeException('Brak wymaganego narzędzia: ' . $name . '.');
         if ($requireNode) {
-            foreach (['node', 'npm'] as $name) if (empty($checks[$name]['ok'])) throw new RuntimeException('Brak wymaganego narzędzia: ' . $name . '.');
-            $node = $this->run(['node', '-p', 'process.versions.node']);
-            $nodeParts = array_map('intval', explode('.', trim($node['stdout'])));
-            if (($nodeParts[0] ?? 0) < 22 || (($nodeParts[0] ?? 0) === 22 && ($nodeParts[1] ?? 0) < 13)) throw new RuntimeException('Wymagany jest Node.js 22.13 lub nowszy.');
+            $runtime = $this->resolveNodeRuntime();
+            if ($runtime === null) throw new RuntimeException('Nie znaleziono Node.js w PATH ani w /opt/plesk/node/*/bin/node. Zainstaluj Node.js Toolkit z Node.js 22.13 lub nowszym.');
+            $nodeParts = array_map('intval', explode('.', ltrim($runtime['version'], 'v')));
+            if (($nodeParts[0] ?? 0) < 22 || (($nodeParts[0] ?? 0) === 22 && ($nodeParts[1] ?? 0) < 13)) throw new RuntimeException('Wymagany jest Node.js 22.13 lub nowszy; znaleziono ' . $runtime['version'] . ' w ' . $runtime['node'] . '.');
+            if ($runtime['npm'] === null || empty($checks['npm']['ok'])) throw new RuntimeException('Nie znaleziono npm zgodnego z ' . $runtime['node'] . '. Zainstaluj lub napraw Node.js Toolkit w Plesku.');
         }
         $this->run(['id', $this->config['serviceUser']]);
+    }
+
+    private function resolveNodeRuntime()
+    {
+        if ($this->nodeRuntimeResolved) return $this->nodeRuntime;
+        $this->nodeRuntimeResolved = true;
+        $candidates = ['/usr/local/bin/node', '/usr/bin/node', '/usr/bin/nodejs'];
+        $pleskCandidates = glob('/opt/plesk/node/*/bin/node');
+        if (is_array($pleskCandidates)) $candidates = array_merge($candidates, $pleskCandidates);
+        $path = getenv('PATH');
+        if (is_string($path)) {
+            foreach (explode(':', $path) as $directory) {
+                if ($directory !== '' && $directory[0] === '/') $candidates[] = rtrim($directory, '/') . '/node';
+            }
+        }
+
+        $runtimes = [];
+        $seen = [];
+        foreach ($candidates as $candidate) {
+            $resolved = realpath($candidate);
+            if ($resolved === false || isset($seen[$resolved]) || !is_file($resolved) || !is_executable($resolved) || !preg_match('#^/[A-Za-z0-9._/+:-]+$#', $resolved)) continue;
+            $seen[$resolved] = true;
+            $versionResult = $this->run([$resolved, '-p', 'process.versions.node'], [], null, true);
+            $version = trim($versionResult['stdout']);
+            if ($versionResult['code'] !== 0 || !preg_match('/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/', $version)) continue;
+            $versionParts = array_map('intval', explode('.', $version));
+            $supported = ($versionParts[0] ?? 0) > 22 || (($versionParts[0] ?? 0) === 22 && ($versionParts[1] ?? 0) >= 13);
+            $runtimes[] = ['node' => $resolved, 'npm' => $this->resolveNpmCli($resolved), 'version' => $version, 'supported' => $supported];
+        }
+        usort($runtimes, function ($left, $right) {
+            $leftRank = ($left['supported'] ? 2 : 0) + ($left['npm'] !== null ? 1 : 0);
+            $rightRank = ($right['supported'] ? 2 : 0) + ($right['npm'] !== null ? 1 : 0);
+            if ($leftRank !== $rightRank) return $rightRank - $leftRank;
+            return version_compare($right['version'], $left['version']);
+        });
+        $this->nodeRuntime = $runtimes[0] ?? null;
+        return $this->nodeRuntime;
+    }
+
+    private function resolveNpmCli($node)
+    {
+        $bin = dirname($node);
+        $prefix = dirname($bin);
+        foreach ([$bin . '/npm', $prefix . '/lib/node_modules/npm/bin/npm-cli.js', $prefix . '/share/nodejs/npm/bin/npm-cli.js'] as $candidate) {
+            $resolved = realpath($candidate);
+            if ($resolved !== false && is_file($resolved) && preg_match('#^/[A-Za-z0-9._/+:-]+$#', $resolved)) return $resolved;
+        }
+        return null;
+    }
+
+    private function nodeEnvironment(array $runtime)
+    {
+        $path = getenv('PATH');
+        return ['PATH' => dirname($runtime['node']) . (is_string($path) && $path !== '' ? ':' . $path : '')];
     }
 
     private function serviceState($unit)
