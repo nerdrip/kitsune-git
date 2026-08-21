@@ -23,6 +23,7 @@ final class KitsuneRepositorySelfUpdateRunner
     private $config;
     private $varDir;
     private $repository;
+    private $trustFile;
     private $temporary = [];
 
     public function __construct($mode, $configPath)
@@ -47,6 +48,7 @@ final class KitsuneRepositorySelfUpdateRunner
         $this->ensureDirectory($root, 0700);
         if (is_link($root)) throw new RuntimeException('Katalog aktualizacji nie może być dowiązaniem symbolicznym.');
         $this->repository = $root . '/' . $id;
+        $this->trustFile = $root . '/known_hosts';
     }
 
     public function execute()
@@ -188,14 +190,66 @@ final class KitsuneRepositorySelfUpdateRunner
             $askpass = $this->temporaryFile('askpass', "#!/bin/sh\ncase \"\$1\" in *Username*) printf '%s\\n' \"\$KITSUNE_GIT_USERNAME\" ;; *) printf '%s\\n' \"\$KITSUNE_GIT_TOKEN\" ;; esac\n", 0700);
             $environment['GIT_ASKPASS'] = $askpass; $environment['GIT_USERNAME'] = (string) ($this->config['gitUsername'] ?? 'x-access-token'); $environment['KITSUNE_GIT_USERNAME'] = $environment['GIT_USERNAME']; $environment['KITSUNE_GIT_TOKEN'] = $token;
         }
-        if ($key !== '') {
-            $known = trim((string) ($this->config['gitSshKnownHosts'] ?? ''));
-            if ($known === '') throw new RuntimeException('Repozytorium SSH wymaga zapisanego known_hosts.');
+        if ($this->repositorySshEndpoint($url) !== null) {
+            $hostsPath = $this->ensureKnownHosts($url);
+            $ssh = 'ssh';
+            if ($key !== '') {
             $keyPath = $this->temporaryFile('key', $key . "\n", 0600);
-            $hostsPath = $this->temporaryFile('known-hosts', $known . "\n", 0600);
-            $environment['GIT_SSH_COMMAND'] = 'ssh -i ' . escapeshellarg($keyPath) . ' -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=' . escapeshellarg($hostsPath);
+                $ssh .= ' -i ' . escapeshellarg($keyPath) . ' -o IdentitiesOnly=yes';
+            }
+            $environment['GIT_SSH_COMMAND'] = $ssh . ' -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=' . escapeshellarg($hostsPath);
         }
         return $environment;
+    }
+
+    private function ensureKnownHosts($url)
+    {
+        $endpoint = $this->repositorySshEndpoint($url);
+        if ($endpoint === null) throw new RuntimeException('Nie można ustalić hosta repozytorium SSH.');
+        if (is_link($this->trustFile)) throw new RuntimeException('Plik zaufanych hostów nie może być dowiązaniem symbolicznym.');
+        $configured = trim((string) ($this->config['gitSshKnownHosts'] ?? ''));
+        $stored = is_file($this->trustFile) ? trim((string) file_get_contents($this->trustFile)) : '';
+        $lines = preg_split('/\r?\n/', trim($configured . "\n" . $stored), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $hostToken = $endpoint['port'] === 22 ? $endpoint['host'] : '[' . $endpoint['host'] . ']:' . $endpoint['port'];
+        $hasHost = false;
+        foreach ($lines as $line) {
+            if (preg_match('/^' . preg_quote($hostToken, '/') . '[ \t]+/', trim((string) $line))) { $hasHost = true; break; }
+        }
+        if (!$hasHost) {
+            $command = ['ssh-keyscan', '-T', '15'];
+            if ($endpoint['port'] !== 22) $command[] = '-p';
+            if ($endpoint['port'] !== 22) $command[] = (string) $endpoint['port'];
+            $command[] = $endpoint['host'];
+            $scanned = preg_split('/\r?\n/', trim((string) $this->run($command)['stdout']), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $accepted = [];
+            foreach ($scanned as $line) {
+                $line = trim((string) $line);
+                if ($line === '' || $line[0] === '#') continue;
+                if (!preg_match('/^([^ \t]+)[ \t]+(ssh-ed25519|ecdsa-sha2-nistp(?:256|384|521)|ssh-rsa)[ \t]+[A-Za-z0-9+\/]+={0,3}$/', $line, $match) || !hash_equals($hostToken, $match[1])) throw new RuntimeException('ssh-keyscan zwrócił nieprawidłowy klucz hosta.');
+                $accepted[] = $line;
+            }
+            if (!$accepted) throw new RuntimeException('ssh-keyscan nie zwrócił klucza hosta repozytorium.');
+            $lines = array_merge($lines, $accepted);
+        }
+        $contents = implode("\n", array_values(array_unique(array_map('trim', $lines)))) . "\n";
+        if (strlen($contents) > 131072) throw new RuntimeException('Plik zaufanych hostów przekracza dozwolony rozmiar.');
+        $temporary = $this->trustFile . '.tmp-' . bin2hex(random_bytes(8));
+        if (file_put_contents($temporary, $contents, LOCK_EX) === false) throw new RuntimeException('Nie można zapisać automatycznie wykrytego known_hosts.');
+        @chmod($temporary, 0600);
+        if (!rename($temporary, $this->trustFile)) { @unlink($temporary); throw new RuntimeException('Nie można utrwalić automatycznie wykrytego known_hosts.'); }
+        @chmod($this->trustFile, 0600);
+        return $this->trustFile;
+    }
+
+    private function repositorySshEndpoint($url)
+    {
+        if (preg_match('/^git@([A-Za-z0-9.-]+):[^\s]+$/', (string) $url, $match)) return ['host' => $match[1], 'port' => 22];
+        $parts = parse_url((string) $url);
+        if (!is_array($parts) || ($parts['scheme'] ?? '') !== 'ssh') return null;
+        $host = (string) ($parts['host'] ?? '');
+        $port = (int) ($parts['port'] ?? 22);
+        if (!preg_match('/^[A-Za-z0-9.-]+$/', $host) || $port < 1 || $port > 65535) throw new RuntimeException('Nieprawidłowy host lub port repozytorium SSH.');
+        return ['host' => $host, 'port' => $port];
     }
 
     private function temporaryFile($label, $contents, $mode)

@@ -1,3 +1,7 @@
+# 1.4.0-9
+
+* Automatically discover and privately persist SSH host keys on first update, then enforce strict host verification.
+
 # 1.4.0-8
 
 * Replace the central Suite manifest self-update with a verified repository checkout, fast-forward and pinned-commit package.
