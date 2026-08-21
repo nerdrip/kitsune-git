@@ -10,6 +10,8 @@
   const infoContent = document.getElementById('info-content');
   const loginDialog = document.getElementById('login-dialog');
   const loginForm = document.getElementById('login-form');
+  const bootstrapDialog = document.getElementById('bootstrap-dialog');
+  const bootstrapForm = document.getElementById('bootstrap-form');
 
   async function api(route, options = {}) {
     const method = options.method || 'GET';
@@ -73,8 +75,23 @@
     } catch (error) { status.textContent = error.message; }
   }
 
-  document.getElementById('connect').addEventListener('click', async () => { if (!state.me) { const providers = await api('/auth/providers').catch(() => ({})); document.getElementById('oidc-login').hidden = !providers.oidc; document.getElementById('ldap-login').hidden = !providers.ldap; return loginDialog.showModal(); } try { await api('/auth/logout', { method: 'POST' }); } catch {} state.token = ''; state.csrfToken = ''; state.me = null; await load(); });
+  async function refreshBootstrapAvailability() { const result = await api('/auth/bootstrap'); document.getElementById('bootstrap-admin').hidden = !result.available; return result.available; }
+  document.getElementById('connect').addEventListener('click', async () => { if (!state.me) { const [providers] = await Promise.all([api('/auth/providers').catch(() => ({})), refreshBootstrapAvailability().catch(() => false)]); document.getElementById('oidc-login').hidden = !providers.oidc; document.getElementById('ldap-login').hidden = !providers.ldap; return loginDialog.showModal(); } try { await api('/auth/logout', { method: 'POST' }); } catch {} state.token = ''; state.csrfToken = ''; state.me = null; await load(); });
   document.getElementById('close-login').addEventListener('click', () => loginDialog.close());
+  document.getElementById('bootstrap-admin').addEventListener('click', () => { document.getElementById('bootstrap-error').textContent = ''; loginDialog.close(); bootstrapDialog.showModal(); });
+  document.getElementById('close-bootstrap').addEventListener('click', () => bootstrapDialog.close());
+  document.getElementById('cancel-bootstrap').addEventListener('click', () => bootstrapDialog.close());
+  bootstrapForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(bootstrapForm));
+    const error = document.getElementById('bootstrap-error');
+    if (values.password !== values.confirmPassword) { error.textContent = 'Passwords do not match'; return; }
+    delete values.confirmPassword;
+    try {
+      const result = await api('/auth/bootstrap', { method: 'POST', body: JSON.stringify(values) });
+      state.token = ''; state.csrfToken = result.csrfToken; bootstrapForm.reset(); bootstrapDialog.close(); document.getElementById('bootstrap-admin').hidden = true; await load();
+    } catch (bootstrapError) { error.textContent = bootstrapError.message; }
+  });
   document.getElementById('admin-token').addEventListener('click', async () => { const token = prompt('Administrator token (kept only in memory)'); if (!token) return; state.token = token.trim(); loginDialog.close(); await load(); });
   document.getElementById('oidc-login').addEventListener('click', () => { location.href = '/api/v1/auth/oidc/start'; });
   document.getElementById('ldap-login').addEventListener('click', async () => { try { const values = Object.fromEntries(new FormData(loginForm)); const result = await api('/auth/ldap', { method: 'POST', body: JSON.stringify({ username: values.identifier, password: values.password }) }); state.csrfToken = result.csrfToken; loginDialog.close(); await load(); } catch (error) { document.getElementById('login-error').textContent = error.message; } });
@@ -106,5 +123,6 @@
     try { await api(importing ? '/imports' : '/projects', { method: 'POST', body: JSON.stringify(values) }); dialog.close(); await load(); }
     catch (error) { document.getElementById('form-error').textContent = error.message; }
   });
+  refreshBootstrapAvailability().catch(() => {});
   load();
 })();

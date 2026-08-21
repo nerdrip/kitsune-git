@@ -36,6 +36,23 @@ class IdentityService {
   _publicUser(user) { const { tokenHashes, passwordHash, totpSecret, ...safe } = user; return { ...safe, tokenCount: tokenHashes?.length || 0, passwordEnabled: Boolean(passwordHash), totpEnabled: Boolean(totpSecret), passkeyCount: this.store.snapshot().passkeys.filter(item => item.userId === user.id).length }; }
   _rateLimit(key) { const now = Date.now(); const current = this.attempts.get(key) || []; const recent = current.filter(value => now - value < 15 * 60_000); if (recent.length >= 10) throw Object.assign(new Error('Too many authentication attempts'), { statusCode: 429 }); recent.push(now); this.attempts.set(key, recent); }
   _clearRateLimit(key) { this.attempts.delete(key); }
+  bootstrapAvailable() { return !this.store.snapshot().users.some(user => user.admin); }
+  async bootstrapAdmin(input, context = {}) {
+    if (!this.bootstrapAvailable()) throw Object.assign(new Error('Administrator account is already registered'), { statusCode: 409 });
+    const username = slug(input.username, 'Username');
+    const targetEmail = email(input.email);
+    const name = text(input.name, 'Name', { max: 256, required: true });
+    const passwordHash = await hashPassword(input.password);
+    const now = new Date().toISOString();
+    const user = { id: crypto.randomUUID(), username, email: targetEmail, emailVerifiedAt: now, name, admin: true, blocked: false, passwordHash, passwordChangedAt: now, tokenHashes: [], createdAt: now };
+    const saved = this.store.update(state => {
+      if (state.users.some(item => item.admin)) throw Object.assign(new Error('Administrator account is already registered'), { statusCode: 409 });
+      if (state.users.some(item => item.username === username || item.email === targetEmail)) throw Object.assign(new Error('Username or email address is already registered'), { statusCode: 409 });
+      state.users.push(user);
+      return user;
+    }, { actor: 'bootstrap', action: 'identity.bootstrap-admin', target: user.id });
+    return this._session(saved, context, 'bootstrap');
+  }
   async setPassword(userId, password, actor) { if (!actor?.admin && actor?.id !== userId) throw Object.assign(new Error('Forbidden'), { statusCode: 403 }); const encoded = await hashPassword(password); return this.store.update(state => { const user = state.users.find(item => item.id === userId); if (!user) throw Object.assign(new Error('User not found'), { statusCode: 404 }); user.passwordHash = encoded; user.passwordChangedAt = new Date().toISOString(); state.sessions = state.sessions.filter(item => item.userId !== userId || item.id === actor.sessionId); return this._publicUser(user); }, { actor: actor.username, action: 'identity.password-set', target: userId }); }
   async login(input, context = {}) { const key = `${context.ip || ''}:${String(input.identifier || '').toLowerCase()}`; this._rateLimit(key); const user = this._user(input.identifier); const valid = user ? await verifyPassword(input.password, user.passwordHash) : await hashPassword('invalid-password-value').then(() => false); if (!valid) throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 }); if (user.totpSecret) { const ticket = this._challenge('totp-login', user.id); return { mfaRequired: true, ticket: ticket.token }; } this._clearRateLimit(key); return this._session(user, context, 'password'); }
   _session(user, context, method) { const token = randomToken('kgs'); const csrfToken = randomToken('csrf'); const now = Date.now(); const session = { id: crypto.randomUUID(), userId: user.id, tokenHash: tokenHash(token), csrfToken, method, userAgent: String(context.userAgent || '').slice(0, 512), ip: String(context.ip || '').slice(0, 128), createdAt: new Date(now).toISOString(), lastSeenAt: new Date(now).toISOString(), expiresAt: new Date(now + SESSION_HOURS * 3600_000).toISOString() }; this.store.update(state => { state.sessions.push(session); state.sessions = state.sessions.filter(item => Date.parse(item.expiresAt) > now).slice(-20_000); return null; }, { actor: user.username, action: 'session.create', target: session.id }); return { user: this._publicUser(user), session: { token, csrfToken, expiresAt: session.expiresAt } }; }

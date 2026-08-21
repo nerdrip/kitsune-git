@@ -66,6 +66,13 @@ function createApp({ projects, groups, workItems, policy, mirrors, forgeMesh, co
           return json(response, 200, { user: result.user, csrfToken: result.session.csrfToken, expiresAt: result.session.expiresAt });
         };
         if (url.pathname === '/api/v1/auth/providers' && request.method === 'GET') return json(response, 200, externalAuth?.capabilities() || { oidc: false, ldap: false });
+        if (url.pathname === '/api/v1/auth/bootstrap' && request.method === 'GET') return json(response, 200, { available: identity.bootstrapAvailable() });
+        if (url.pathname === '/api/v1/auth/bootstrap' && request.method === 'POST') {
+          if (!identity.bootstrapAvailable()) throw Object.assign(new Error('Administrator account is already registered'), { statusCode: 409 });
+          const body = await readJson(request);
+          if (!secureEqual(body.adminToken, adminToken)) throw Object.assign(new Error('Invalid administrator bootstrap token'), { statusCode: 401 });
+          return establish(await identity.bootstrapAdmin(body, context));
+        }
         if (url.pathname === '/api/v1/auth/oidc/start' && request.method === 'GET' && externalAuth) { response.writeHead(302, { Location: await externalAuth.beginOidc(), 'Cache-Control': 'no-store' }); return response.end(); }
         if (url.pathname === '/api/v1/auth/oidc/callback' && request.method === 'GET' && externalAuth) { const result = await externalAuth.completeOidc(Object.fromEntries(url.searchParams), context); response.setHeader('Set-Cookie', identity.sessionCookie(result.session.token, secureCookie)); response.writeHead(302, { Location: '/?login=oidc', 'Cache-Control': 'no-store' }); return response.end(); }
         if (url.pathname === '/api/v1/auth/ldap' && request.method === 'POST' && externalAuth) return establish(await externalAuth.loginLdap(await readJson(request), context));
