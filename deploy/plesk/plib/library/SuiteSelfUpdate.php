@@ -2,10 +2,22 @@
 
 final class KitsuneSuiteSelfUpdate
 {
-    public const MANIFEST_URL = 'https://raw.githubusercontent.com/nerdrip/kitsune-serv/main/update/manifest.json';
     private const STATE_KEY = 'kitsune_suite_self_update';
-    private const MAX_MANIFEST_BYTES = 2097152;
-    private const MAX_PACKAGE_BYTES = 134217728;
+    private const RESULT_PREFIX = 'KITSUNE_SELF_UPDATE_RESULT=';
+    private const REPOSITORIES = [
+        'kitsuneartifactory-manager' => ['url' => 'https://github.com/nerdrip/KitsuneArtifactory.git', 'source' => 'tools/plesk-extension/kitsuneartifactory-manager'],
+        'kitsuneirc-manager' => ['url' => 'https://github.com/nerdrip/kitsune-irc.git', 'source' => 'tools/plesk-extension/kitsuneirc-manager'],
+        'kitsunecolab-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/kitsunecolab.git', 'source' => 'tools/plesk-extension/kitsunecolab-manager'],
+        'kitsunepaint-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/kitsunepaint.git', 'source' => 'tools/plesk-extension/kitsunepaint-manager'],
+        'kitsunepnc-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/kitsunepnc.git', 'source' => 'tools/plesk-extension/kitsunepnc-manager'],
+        'kitsunetab-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/kitsunetab.git', 'source' => 'tools/plesk-extension/kitsunetab-manager'],
+        'kitsunetest-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/kitsunetest.git', 'source' => 'tools/plesk-extension/kitsunetest-manager'],
+        'nailit-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/nailit.git', 'source' => 'tools/plesk-extension/nailit-manager'],
+        'kitsune-git' => ['url' => 'https://github.com/nerdrip/kitsune-git.git', 'source' => 'deploy/plesk'],
+        'wpkit-parse-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/wpkit.git', 'source' => 'tools/plesk-extension/wpkit-parse-manager'],
+        'nerd-apps-runtime-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/dicex.git', 'source' => 'tools/plesk-extension/nerd-apps-runtime-manager'],
+        'ultimate-tool' => ['url' => 'ssh://git@git.servx.site:32785/boberski/ultimatetool.git', 'source' => 'plesk-extension'],
+    ];
 
     public static function extensionId()
     {
@@ -20,6 +32,13 @@ final class KitsuneSuiteSelfUpdate
         return ['id' => (string) $extension->getId(), 'name' => (string) $extension->getName(), 'version' => (string) $extension->getVersion(), 'release' => (string) $extension->getRelease()];
     }
 
+    public static function source()
+    {
+        $id = self::extensionId();
+        $spec = self::repositorySpec($id);
+        return ['url' => self::plainSetting(['repositoryUrl', 'deploy_repositoryUrl', 'panel_repositoryUrl'], $spec['url']), 'branch' => self::plainSetting(['repositoryBranch', 'deploy_repositoryBranch', 'panel_repositoryRef'], 'main'), 'path' => $spec['source']];
+    }
+
     public static function state()
     {
         $raw = (string) pm_Settings::get(self::STATE_KEY, '');
@@ -31,20 +50,8 @@ final class KitsuneSuiteSelfUpdate
     {
         try {
             $installed = self::installed();
-            $manifest = json_decode(self::downloadMemory(self::MANIFEST_URL, self::MAX_MANIFEST_BYTES), true);
-            if (!is_array($manifest) || (int) ($manifest['schemaVersion'] ?? 0) !== 1 || !is_array($manifest['packages'] ?? null)) throw new RuntimeException('Repozytorium zwróciło nieprawidłowy manifest aktualizacji.');
-            $package = null;
-            foreach ($manifest['packages'] as $candidate) {
-                if (is_array($candidate) && (string) ($candidate['id'] ?? '') === $installed['id']) { $package = self::validatePackage($candidate, $installed['id']); break; }
-            }
-            if ($package === null) throw new RuntimeException('Manifest nie zawiera paczki dla ' . $installed['id'] . '.');
-            $state = [
-                'status' => self::isNewer($installed, $package) ? 'available' : 'current',
-                'checkedAt' => gmdate('c'), 'updatedAt' => (string) (self::state()['updatedAt'] ?? ''),
-                'installedVersion' => $installed['version'], 'installedRelease' => $installed['release'],
-                'remoteVersion' => $package['version'], 'remoteRelease' => $package['release'],
-                'file' => $package['file'], 'sha256' => $package['sha256'], 'error' => '',
-            ];
+            $remote = self::runRepositoryOperation('check');
+            $state = self::stateFrom($installed, $remote, self::isNewer($installed, $remote) ? 'available' : 'current');
             self::save($state);
             return $state;
         } catch (Throwable $exception) {
@@ -55,103 +62,148 @@ final class KitsuneSuiteSelfUpdate
 
     public static function update()
     {
-        $state = self::check();
-        if ($state['status'] !== 'available') throw new RuntimeException('Zainstalowana wersja rozszerzenia jest już aktualna.');
-        $temporary = tempnam(pm_Context::getVarDir(), 'self-update-');
-        if ($temporary === false) throw new RuntimeException('Nie można utworzyć pliku tymczasowego aktualizacji.');
         try {
+            $state = self::check();
+            if ($state['status'] !== 'available') throw new RuntimeException('Zainstalowana wersja rozszerzenia jest już aktualna.');
             self::save(array_merge($state, ['status' => 'installing', 'error' => '']));
-            self::downloadFile(self::packageUrl($state['file']), $temporary, self::MAX_PACKAGE_BYTES);
-            $digest = strtolower((string) hash_file('sha256', $temporary));
-            if (!hash_equals($state['sha256'], $digest)) throw new RuntimeException('Suma SHA-256 pobranej paczki jest nieprawidłowa.');
-            $metadata = self::inspectPackage($temporary, self::extensionId());
-            if ($metadata['version'] !== $state['remoteVersion'] || $metadata['release'] !== $state['remoteRelease']) throw new RuntimeException('meta.xml pobranej paczki nie odpowiada manifestowi.');
-            pm_Extension::installByFile($temporary);
-            $complete = array_merge($state, ['status' => 'updated', 'installedVersion' => $metadata['version'], 'installedRelease' => $metadata['release'], 'updatedAt' => gmdate('c'), 'error' => '']);
+            $result = self::runRepositoryOperation('install');
+            $installed = ['version' => $result['version'], 'release' => $result['release']];
+            $complete = self::stateFrom($installed, $result, 'updated');
+            $complete['updatedAt'] = gmdate('c');
             self::save($complete);
             return $complete;
         } catch (Throwable $exception) {
             self::failure($exception);
             throw $exception;
-        } finally {
-            if (is_file($temporary)) @unlink($temporary);
         }
+    }
+
+    private static function runRepositoryOperation($mode)
+    {
+        $id = self::extensionId();
+        if ($id === 'ultimate-tool') return self::runUltimateTool($mode);
+        $spec = self::repositorySpec($id);
+        $source = self::source();
+        $runtime = self::writeRuntime([
+            'schemaVersion' => 1,
+            'extensionId' => $id,
+            'repositoryUrl' => $source['url'],
+            'repositoryBranch' => $source['branch'],
+            'extensionSource' => $spec['source'],
+            'gitUsername' => self::plainSetting(['gitUsername', 'deploy_gitUsername'], 'x-access-token'),
+            'gitSshKnownHosts' => self::plainSetting(['gitSshKnownHosts', 'deploy_gitSshKnownHosts'], ''),
+            'gitToken' => self::secretSetting(['secret_git_token', 'gitToken']),
+            'gitSshPrivateKey' => self::secretSetting(['secret_git_ssh_private_key', 'gitSshPrivateKey']),
+        ]);
+        try {
+            $result = pm_ApiCli::callSbin('kitsune-suite-self-update', ['--' . $mode, $runtime], pm_ApiCli::RESULT_FULL);
+            return self::parseRunnerResult($result);
+        } finally {
+            if (is_file($runtime)) @unlink($runtime);
+        }
+    }
+
+    private static function runUltimateTool($mode)
+    {
+        $privateKey = self::chunkedSecret('deploy_source_private_key');
+        if ($privateKey === '') throw new RuntimeException('Repozytorium Ultimate Tool wymaga zapisanego prywatnego klucza wdrożeniowego.');
+        $source = self::source();
+        $uuid = self::uuid();
+        $runtime = rtrim((string) pm_Context::getVarDir(), '/\\') . '/extension-update-' . $uuid . '.json';
+        self::writeProtected($runtime, json_encode(['operationUuid' => $uuid, 'privateKey' => $privateKey, 'repositoryRef' => $source['branch'], 'repositoryUrl' => $source['url']], JSON_UNESCAPED_SLASHES));
+        try {
+            $result = pm_ApiCli::callSbin('ultimate-tool-manager', [$mode === 'install' ? '--extension-update' : '--extension-status', $runtime], pm_ApiCli::RESULT_FULL);
+            if ((int) ($result['code'] ?? 1) !== 0) throw new RuntimeException(trim((string) ($result['stderr'] ?? $result['stdout'] ?? 'Aktualizacja Ultimate Tool nie powiodła się.')));
+            $decoded = json_decode(trim((string) ($result['stdout'] ?? '')), true);
+            $metadata = ['version' => (string) ($decoded['remoteVersion'] ?? ''), 'release' => (string) ($decoded['remoteRelease'] ?? ''), 'branch' => $source['branch'], 'commit' => (string) ($decoded['commit'] ?? '')];
+            if (!is_array($decoded) || !preg_match('/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/', $metadata['version']) || !preg_match('/^[1-9]\d{0,8}$/', $metadata['release']) || !preg_match('/^[a-f0-9]{40,64}$/', $metadata['commit'])) throw new RuntimeException('Runner Ultimate Tool zwrócił nieprawidłowe metadane.');
+            return $metadata;
+        } finally {
+            if (is_file($runtime)) @unlink($runtime);
+        }
+    }
+
+    private static function parseRunnerResult(array $result)
+    {
+        if ((int) ($result['code'] ?? 1) !== 0) {
+            $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
+            throw new RuntimeException($detail !== '' ? mb_substr($detail, -3000) : 'Runner aktualizacji zakończył się błędem.');
+        }
+        $stdout = (string) ($result['stdout'] ?? '');
+        if (!preg_match('/^' . preg_quote(self::RESULT_PREFIX, '/') . '(\{[^\r\n]+\})$/m', $stdout, $match)) throw new RuntimeException('Runner aktualizacji nie zwrócił metadanych repozytorium.');
+        $metadata = json_decode($match[1], true);
+        if (!is_array($metadata) || !preg_match('/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/', (string) ($metadata['version'] ?? '')) || !preg_match('/^[1-9]\d{0,8}$/', (string) ($metadata['release'] ?? '')) || !preg_match('/^[a-f0-9]{40,64}$/', (string) ($metadata['commit'] ?? ''))) throw new RuntimeException('Runner aktualizacji zwrócił nieprawidłowe metadane.');
+        return $metadata;
+    }
+
+    private static function writeRuntime(array $payload)
+    {
+        $directory = rtrim((string) pm_Context::getVarDir(), '/\\');
+        if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) throw new RuntimeException('Nie można utworzyć prywatnego katalogu aktualizacji.');
+        @chmod($directory, 0700);
+        $path = $directory . '/self-update-' . bin2hex(random_bytes(12)) . '.json';
+        self::writeProtected($path, json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        return $path;
+    }
+
+    private static function writeProtected($path, $json)
+    {
+        if (!is_string($json)) throw new RuntimeException('Nie można zakodować konfiguracji aktualizacji.');
+        $previous = umask(0077);
+        try {
+            if (file_put_contents($path, $json, LOCK_EX) === false) throw new RuntimeException('Nie można zapisać konfiguracji aktualizacji.');
+            @chmod($path, 0600);
+        } finally {
+            umask($previous);
+        }
+    }
+
+    private static function stateFrom(array $installed, array $remote, $status)
+    {
+        return ['status' => $status, 'checkedAt' => gmdate('c'), 'updatedAt' => (string) (self::state()['updatedAt'] ?? ''), 'installedVersion' => (string) $installed['version'], 'installedRelease' => (string) $installed['release'], 'remoteVersion' => (string) $remote['version'], 'remoteRelease' => (string) $remote['release'], 'repositoryBranch' => (string) ($remote['branch'] ?? ''), 'repositoryCommit' => (string) ($remote['commit'] ?? ''), 'error' => ''];
+    }
+
+    private static function repositorySpec($id)
+    {
+        if (!isset(self::REPOSITORIES[$id])) throw new RuntimeException('Brak konfiguracji repozytorium dla ' . $id . '.');
+        return self::REPOSITORIES[$id];
+    }
+
+    private static function plainSetting(array $keys, $default)
+    {
+        foreach ($keys as $key) {
+            $value = trim((string) pm_Settings::get($key, ''));
+            if ($value !== '') return $value;
+        }
+        return $default;
+    }
+
+    private static function secretSetting(array $keys)
+    {
+        foreach ($keys as $key) {
+            try { $value = (string) pm_Settings::getDecrypted($key); } catch (Throwable $exception) { $value = ''; }
+            if (trim($value) !== '') return $value;
+        }
+        return '';
+    }
+
+    private static function chunkedSecret($name)
+    {
+        $manifest = self::secretSetting([$name . '_manifest']);
+        $decoded = $manifest !== '' ? json_decode($manifest, true) : null;
+        if (!is_array($decoded) || (int) ($decoded['version'] ?? 0) !== 1 || (int) ($decoded['chunks'] ?? 0) < 1 || (int) $decoded['chunks'] > 48) return '';
+        $value = '';
+        for ($index = 0; $index < (int) $decoded['chunks']; $index++) $value .= self::secretSetting([$name . '_chunk_' . str_pad((string) $index, 2, '0', STR_PAD_LEFT)]);
+        return strlen($value) === (int) ($decoded['bytes'] ?? -1) && hash_equals((string) ($decoded['sha256'] ?? ''), hash('sha256', $value)) ? $value : '';
     }
 
     private static function emptyState()
     {
-        return ['status' => 'unchecked', 'checkedAt' => '', 'updatedAt' => '', 'installedVersion' => '', 'installedRelease' => '', 'remoteVersion' => '', 'remoteRelease' => '', 'file' => '', 'sha256' => '', 'error' => ''];
+        return ['status' => 'unchecked', 'checkedAt' => '', 'updatedAt' => '', 'installedVersion' => '', 'installedRelease' => '', 'remoteVersion' => '', 'remoteRelease' => '', 'repositoryBranch' => '', 'repositoryCommit' => '', 'error' => ''];
     }
 
-    private static function save(array $state)
-    {
-        pm_Settings::set(self::STATE_KEY, json_encode(array_merge(self::emptyState(), $state), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
-    }
-
-    private static function failure(Throwable $exception)
-    {
-        self::save(array_merge(self::state(), ['status' => 'failed', 'checkedAt' => gmdate('c'), 'error' => mb_substr($exception->getMessage(), 0, 1800)]));
-    }
-
-    private static function validatePackage($package, $expectedId)
-    {
-        $out = [];
-        foreach (['id', 'name', 'version', 'release', 'file', 'sha256'] as $field) $out[$field] = trim((string) ($package[$field] ?? ''));
-        if ($out['id'] !== $expectedId || !preg_match('/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/', $out['version']) || !preg_match('/^\d+$/', $out['release'])) throw new RuntimeException('Manifest zawiera nieprawidłowe metadane wersji rozszerzenia.');
-        if (!preg_match('#^packages/[A-Za-z0-9][A-Za-z0-9._-]*\.zip$#', $out['file']) || !preg_match('/^[a-f0-9]{64}$/', $out['sha256'])) throw new RuntimeException('Manifest zawiera nieprawidłową ścieżkę lub sumę paczki.');
-        return $out;
-    }
-
-    private static function isNewer(array $installed, array $package)
-    {
-        $comparison = version_compare($package['version'], $installed['version']);
-        return $comparison > 0 || ($comparison === 0 && (int) $package['release'] > (int) $installed['release']);
-    }
-
-    private static function inspectPackage($path, $expectedId)
-    {
-        if (!class_exists('ZipArchive')) throw new RuntimeException('Plesk PHP nie udostępnia ZipArchive.');
-        $archive = new ZipArchive();
-        if ($archive->open($path) !== true) throw new RuntimeException('Nie można otworzyć pobranej paczki ZIP.');
-        try { $raw = $archive->getFromName('meta.xml'); } finally { $archive->close(); }
-        if ($raw === false) throw new RuntimeException('Paczka nie zawiera meta.xml w katalogu głównym.');
-        $previous = libxml_use_internal_errors(true);
-        try { $xml = simplexml_load_string($raw, 'SimpleXMLElement', LIBXML_NONET); } finally { libxml_clear_errors(); libxml_use_internal_errors($previous); }
-        if ($xml === false || trim((string) $xml->id) !== $expectedId) throw new RuntimeException('Paczka jest przeznaczona dla innego rozszerzenia.');
-        $version = trim((string) $xml->version); $release = trim((string) $xml->release);
-        if (!preg_match('/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/', $version) || !preg_match('/^\d+$/', $release)) throw new RuntimeException('Paczka ma nieprawidłową wersję.');
-        return ['id' => $expectedId, 'name' => trim((string) $xml->name), 'version' => $version, 'release' => $release];
-    }
-
-    private static function packageUrl($file)
-    {
-        return substr(self::MANIFEST_URL, 0, strrpos(self::MANIFEST_URL, '/') + 1) . $file;
-    }
-
-    private static function downloadMemory($url, $maximum)
-    {
-        $body = '';
-        self::request($url, function ($chunk) use (&$body, $maximum) { if (strlen($body) + strlen($chunk) > $maximum) return 0; $body .= $chunk; return strlen($chunk); });
-        return $body;
-    }
-
-    private static function downloadFile($url, $path, $maximum)
-    {
-        $stream = fopen($path, 'wb'); if ($stream === false) throw new RuntimeException('Nie można zapisać paczki aktualizacji.');
-        $written = 0;
-        try { self::request($url, function ($chunk) use ($stream, &$written, $maximum) { $length = strlen($chunk); if ($written + $length > $maximum) return 0; $count = fwrite($stream, $chunk); if ($count !== $length) return 0; $written += $count; return $count; }); }
-        finally { fclose($stream); }
-        if ($written < 1) throw new RuntimeException('Repozytorium zwróciło pustą paczkę.');
-    }
-
-    private static function request($url, callable $writer)
-    {
-        $parts = parse_url((string) $url);
-        if (!is_array($parts) || ($parts['scheme'] ?? '') !== 'https' || empty($parts['host']) || isset($parts['user']) || isset($parts['pass']) || isset($parts['fragment'])) throw new RuntimeException('Kanał aktualizacji musi używać HTTPS.');
-        $handle = curl_init($url);
-        curl_setopt_array($handle, [CURLOPT_HTTPHEADER => ['Accept: application/json, application/zip', 'User-Agent: Kitsune-Plesk-Suite-Self-Update'], CURLOPT_RETURNTRANSFER => false, CURLOPT_FOLLOWLOCATION => false, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_TIMEOUT => 180, CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2, CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_WRITEFUNCTION => static function ($handle, $chunk) use ($writer) { return $writer($chunk); }]);
-        $ok = curl_exec($handle); $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE); $error = curl_error($handle); curl_close($handle);
-        if ($ok === false) throw new RuntimeException('Nie pobrano aktualizacji: ' . ($error !== '' ? $error : 'przekroczono limit rozmiaru'));
-        if ($status < 200 || $status >= 300) throw new RuntimeException('Repozytorium aktualizacji zwróciło HTTP ' . $status . '.');
-    }
+    private static function save(array $state) { pm_Settings::set(self::STATE_KEY, json_encode(array_merge(self::emptyState(), $state), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)); }
+    private static function failure(Throwable $exception) { self::save(array_merge(self::state(), ['status' => 'failed', 'checkedAt' => gmdate('c'), 'error' => mb_substr($exception->getMessage(), 0, 1800)])); }
+    private static function isNewer(array $installed, array $candidate) { $comparison = version_compare($candidate['version'], $installed['version']); return $comparison > 0 || ($comparison === 0 && (int) $candidate['release'] > (int) $installed['release']); }
+    private static function uuid() { $bytes = random_bytes(16); $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40); $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80); $hex = bin2hex($bytes); return substr($hex, 0, 8) . '-' . substr($hex, 8, 4) . '-' . substr($hex, 12, 4) . '-' . substr($hex, 16, 4) . '-' . substr($hex, 20); }
 }

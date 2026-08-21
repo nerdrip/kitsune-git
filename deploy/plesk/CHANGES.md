@@ -1,3 +1,15 @@
+# 1.4.0-8
+
+* Replace the central Suite manifest self-update with a verified repository checkout, fast-forward and pinned-commit package.
+
+# 1.4.0-7
+
+* Normalize deployed code permissions for the unprivileged service account, provide the selected Node.js runtime in the systemd PATH, allow a longer startup window, and include service state plus bounded journal output when readiness fails.
+
+# 1.4.0-6
+
+* Discover Node.js installations managed by Plesk under `/opt/plesk/node`, select the newest available runtime, invoke its matching npm CLI, and pin the absolute Node.js path in generated systemd units.
+
 # 1.4.0-5
 
 * Fixed section navigation by linking every tab to the explicit Plesk extension controller route.

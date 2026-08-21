@@ -139,7 +139,7 @@ Open a repository in KitsuneGIT Desktop, choose **Advanced Repository Tools → 
 
 ## Plesk
 
-Run `npm run build:plesk`, then upload the generated `dist/KitsuneGIT-Plesk-<version>-r<release>.zip` in **Extensions**. The server must provide Linux, systemd, Node.js 22.13+, npm, Git, curl, tar, nginx, and an existing dedicated domain with a valid Plesk TLS certificate.
+Run `npm run build:plesk`, then upload the generated `dist/KitsuneGIT-Plesk-<version>-r<release>.zip` in **Extensions**. The server must provide Linux, systemd, Node.js 22.13+, npm, Git, curl, tar, nginx, and an existing dedicated domain with a valid Plesk TLS certificate. The extension automatically discovers Node.js Toolkit runtimes in `/opt/plesk/node/*/bin/node`, so they do not need to be exposed through the global `PATH`.
 
 The extension verifies the release archive SHA-256, installs the unprivileged web service plus a separate loopback-only, HMAC-authenticated Plesk preview helper, generates administrator/encryption/preview secrets and an Ed25519 SSH host key, and adds a streaming nginx reverse proxy suitable for large Git pushes. The helper alone runs as root and accepts narrowly validated create/delete operations for managed subdomains. Preview routes proxy an application already deployed elsewhere; this is not a build or CI engine. Expired previews are removed automatically. The extension refuses to overwrite existing custom nginx directives and preserves repositories in `/var/lib/kitsune-git` on removal.
 

@@ -112,6 +112,15 @@ if (/proc_open\(\$command\s*,/.test(pleskServiceSource)) {
 if (!/PHP_VERSION_ID\s*<\s*70400[\s\S]{0,300}escapeshellarg/.test(pleskServiceSource)) {
   fail('Plesk service is missing shell-safe process argument handling for PHP < 7.4');
 }
+if (!pleskServiceSource.includes("glob('/opt/plesk/node/*/bin/node')") || !pleskServiceSource.includes("$runtime['node'], $runtime['npm']")) {
+  fail('Plesk service does not discover and invoke the Node.js Toolkit runtime safely');
+}
+if (pleskServiceSource.includes('ExecStart=/usr/bin/env node')) {
+  fail('Plesk systemd units must use the discovered absolute Node.js executable');
+}
+for (const startupDiagnostic of ['normalizeApplicationPermissions', 'SyslogIdentifier=kitsune-git', "journalctl', '--unit", 'Stan usług i ostatnie logi']) {
+  if (!pleskServiceSource.includes(startupDiagnostic)) fail(`Plesk startup diagnostics are incomplete: ${startupDiagnostic}`);
+}
 if (pleskViewSource.includes('href="?tab=') || !pleskViewSource.includes("index.php/index/index?tab=")) {
   fail('Plesk navigation tabs must use the explicit extension controller URL');
 }
