@@ -121,8 +121,11 @@ if (pleskServiceSource.includes('ExecStart=/usr/bin/env node')) {
 for (const startupDiagnostic of ['normalizeApplicationPermissions', 'SyslogIdentifier=kitsune-git', "journalctl', '--unit", 'Stan usług i ostatnie logi']) {
   if (!pleskServiceSource.includes(startupDiagnostic)) fail(`Plesk startup diagnostics are incomplete: ${startupDiagnostic}`);
 }
-if ((pleskServiceSource.match(/ProtectHome=read-only/g) || []).length !== 2 || pleskServiceSource.includes('ProtectHome=true')) {
-  fail('Plesk systemd units must retain read-only access to supported /home application paths');
+if ((pleskServiceSource.match(/ProtectHome=read-only/g) || []).length !== 1 || pleskServiceSource.includes('ProtectHome=true')) {
+  fail('The Plesk preview unit must retain read-only access to supported /home application paths');
+}
+if (!pleskServiceSource.includes('ProtectSystem=strict\\nReadWritePaths={$data}')) {
+  fail('The Plesk web unit must allow its data path to override the read-only system sandbox');
 }
 if (pleskViewSource.includes('href="?tab=') || !pleskViewSource.includes("index.php/index/index?tab=")) {
   fail('Plesk navigation tabs must use the explicit extension controller URL');
