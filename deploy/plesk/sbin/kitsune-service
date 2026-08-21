@@ -314,9 +314,37 @@ final class KitsuneGitPleskManager
 
     private function preparePersistentData()
     {
-        $this->ensureDirectory($this->config['dataRoot'], 0750);
+        $root = $this->config['dataRoot'];
+        $boundary = $this->dataPathBoundary($root);
         $group = trim($this->run(['id', '-gn', $this->config['serviceUser']])['stdout']);
-        $this->run(['chown', '-R', $this->config['serviceUser'] . ':' . $group, $this->config['dataRoot']]);
+        if (!is_dir($boundary) || is_link($boundary)) throw new RuntimeException('Katalog bazowy danych nie istnieje lub jest dowiązaniem symbolicznym.');
+        $current = $boundary;
+        $parts = array_values(array_filter(explode('/', substr($root, strlen($boundary))), function ($part) { return $part !== ''; }));
+        foreach ($parts as $part) {
+            $current .= '/' . $part;
+            if (is_link($current)) throw new RuntimeException('Ścieżka danych nie może zawierać dowiązań symbolicznych.');
+            if (!is_dir($current)) {
+                if (file_exists($current) || !mkdir($current, 0750)) throw new RuntimeException('Nie można utworzyć katalogu danych: ' . $current . '.');
+                $this->run(['chown', $this->config['serviceUser'] . ':' . $group, $current]);
+                @chmod($current, 0750);
+                continue;
+            }
+            clearstatcache(true, $current);
+            $mode = @fileperms($current);
+            if (@fileowner($current) === 0 && @filegroup($current) === 0 && $mode !== false && ($mode & 0777) === 0750) {
+                $this->run(['chown', $this->config['serviceUser'] . ':' . $group, $current]);
+            }
+        }
+        $this->run(['chown', '-R', $this->config['serviceUser'] . ':' . $group, $root]);
+    }
+
+    private function dataPathBoundary($path)
+    {
+        if (preg_match('#^/home/[^/]+#', $path, $matches)) return $matches[0];
+        foreach (['/var/lib', '/opt', '/srv'] as $boundary) {
+            if ($path === $boundary || strpos($path, $boundary . '/') === 0) return $boundary;
+        }
+        throw new RuntimeException('Nie można wyznaczyć bezpiecznego katalogu bazowego danych.');
     }
 
     private function normalizeApplicationPermissions($root)
