@@ -1,3 +1,7 @@
+# 1.4.0-10
+
+* Keep supported `/home` deployment paths visible read-only inside both systemd services, while retaining a narrow writable exception for persistent application data.
+
 # 1.4.0-9
 
 * Automatically discover and privately persist SSH host keys on first update, then enforce strict host verification.
