@@ -103,6 +103,7 @@ if (!fs.existsSync(path.join(ROOT, 'THIRD_PARTY_NOTICES.md'))) fail('Missing thi
 
 const pleskServiceSource = read('deploy/plesk/sbin/kitsune-service');
 const pleskViewSource = read('deploy/plesk/plib/views/scripts/index/index.phtml');
+const pleskWebServerHookSource = read('deploy/plesk/plib/hooks/WebServer.php');
 if (!pleskServiceSource.startsWith('#!/usr/bin/env php\n') || pleskServiceSource.includes('\r\n')) {
   fail('Plesk service entrypoint must use LF line endings');
 }
@@ -132,6 +133,11 @@ if (!pleskServiceSource.includes('ProtectSystem=strict\\nReadWritePaths={$data}'
 }
 if (pleskViewSource.includes('href="?tab=') || !pleskViewSource.includes("index.php/index/index?tab=")) {
   fail('Plesk navigation tabs must use the explicit extension controller URL');
+}
+for (const nginxVariable of ['request_uri', 'host', 'remote_addr', 'proxy_add_x_forwarded_for', 'scheme', 'http_upgrade']) {
+  if (!pleskWebServerHookSource.includes(`\\$${nginxVariable}`) || pleskWebServerHookSource.includes(`\\\\$${nginxVariable}`)) {
+    fail(`Plesk nginx hook does not emit a literal $${nginxVariable} variable`);
+  }
 }
 
 const workflowSource = read('.github/workflows/build-packages.yml');
