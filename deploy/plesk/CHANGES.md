@@ -1,3 +1,7 @@
+# 1.4.0-14
+
+* Add a one-time web onboarding flow that verifies the Plesk bootstrap token and creates the first password-backed administrator account.
+
 # 1.4.0-13
 
 * Emit literal nginx variables in the managed reverse-proxy hook instead of malformed PHP-interpolated values that break Plesk vhost generation.

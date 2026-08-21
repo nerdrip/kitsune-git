@@ -98,6 +98,24 @@ describe('KitsuneGIT Web server', { concurrency: 1 }, () => {
     assert.equal((await fetch(`${baseUrl}/api/v1/projects`)).status, 401);
   });
 
+  it('bootstraps exactly one administrator with the Plesk token', async () => {
+    assert.equal((await api('/api/v1/users', { method: 'POST', body: JSON.stringify({ username: 'preexisting-user', name: 'Preexisting User' }) })).status, 201);
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/v1/auth/bootstrap`)).json(), { available: true });
+    const input = { adminToken: 'wrong-bootstrap-token-value', username: 'primary-admin', name: 'Primary Admin', email: 'admin@example.test', password: 'bootstrap secure password' };
+    assert.equal((await fetch(`${baseUrl}/api/v1/auth/bootstrap`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).status, 401);
+    input.adminToken = token;
+    const response = await fetch(`${baseUrl}/api/v1/auth/bootstrap`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+    assert.equal(response.status, 200);
+    const created = await response.json();
+    assert.equal(created.user.username, 'primary-admin');
+    assert.equal(created.user.email, 'admin@example.test');
+    assert.equal(created.user.admin, true);
+    assert.match(response.headers.get('set-cookie'), /^kitsune_session=/);
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/v1/auth/bootstrap`)).json(), { available: false });
+    assert.equal((await fetch(`${baseUrl}/api/v1/auth/bootstrap`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).status, 409);
+    assert.equal((await fetch(`${baseUrl}/api/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: input.email, password: input.password }) })).status, 200);
+  });
+
   it('supports password sessions, CSRF, invitations, resets, TOTP, and passkey challenges', async () => {
     const created = await (await api('/api/v1/users', { method: 'POST', body: JSON.stringify({ username: 'identity-user', email: 'identity@example.test' }) })).json();
     assert.equal((await api(`/api/v1/users/${created.user.id}/password`, { method: 'PUT', body: JSON.stringify({ password: 'correct horse battery staple' }) })).status, 200);

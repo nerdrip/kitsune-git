@@ -14,6 +14,8 @@ npm run web
 
 Open `http://127.0.0.1:4780` and sign in with a user password/passkey. The bootstrap administrator token remains available for initial administration and automation, but the browser keeps it only in memory. Data defaults to `.kitsune-web`; set `KITSUNE_DATA_PATH` for production.
 
+On a new instance, choose **Create first admin** in the sign-in dialog and enter the bootstrap administrator token shown by the Plesk extension together with the administrator login, display name, email, and password. This enrollment is available only until the first administrator account exists; successful enrollment starts a normal browser session immediately.
+
 ## Containers
 
 Create an `.env` file containing two independently generated values:
@@ -65,6 +67,7 @@ API clients use `Authorization: Bearer <administrator-or-personal-token>`. Brows
 | `GET`, `POST` | `/api/v1/projects/:id/webhooks` | Signed HTTPS webhooks and recent delivery status |
 | `GET` | `/api/v1/audit` | Recent immutable audit events |
 | `GET`, `POST` | `/api/v1/users` | Admin-only user management; creation returns a personal token once |
+| `GET`, `POST` | `/api/v1/auth/bootstrap` | Check first-admin enrollment availability or create the first administrator with the bootstrap token |
 | `GET`, `POST` | `/api/v1/groups` | Groups and nested groups with inherited project permissions |
 | `GET`, `POST` | `/api/v1/groups/:id/members` | Group membership and guest-to-owner roles |
 | `POST` | `/api/v1/users/:id/tokens` | Issue a new personal token |
