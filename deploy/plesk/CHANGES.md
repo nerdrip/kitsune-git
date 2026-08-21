@@ -1,3 +1,7 @@
+# 1.4.0-11
+
+* Allow the web service's narrow `ReadWritePaths` exception to cover persistent data stored below `/home`, while keeping the rest of the filesystem read-only through `ProtectSystem=strict`.
+
 # 1.4.0-10
 
 * Keep supported `/home` deployment paths visible read-only inside both systemd services, while retaining a narrow writable exception for persistent application data.
