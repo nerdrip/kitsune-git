@@ -121,6 +121,9 @@ if (pleskServiceSource.includes('ExecStart=/usr/bin/env node')) {
 for (const startupDiagnostic of ['normalizeApplicationPermissions', 'SyslogIdentifier=kitsune-git', "journalctl', '--unit", 'Stan usług i ostatnie logi']) {
   if (!pleskServiceSource.includes(startupDiagnostic)) fail(`Plesk startup diagnostics are incomplete: ${startupDiagnostic}`);
 }
+for (const dataPermissionGuard of ['dataPathBoundary', "fileowner($current) === 0", "['chown', $this->config['serviceUser'] . ':' . $group, $current]"]) {
+  if (!pleskServiceSource.includes(dataPermissionGuard)) fail(`Plesk persistent data path preparation is incomplete: ${dataPermissionGuard}`);
+}
 if ((pleskServiceSource.match(/ProtectHome=read-only/g) || []).length !== 1 || pleskServiceSource.includes('ProtectHome=true')) {
   fail('The Plesk preview unit must retain read-only access to supported /home application paths');
 }

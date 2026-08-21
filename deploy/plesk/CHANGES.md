@@ -1,3 +1,7 @@
+# 1.4.0-12
+
+* Create every managed persistent-data path component with the service account ownership and repair root-owned `0750` parent directories left by older deployments.
+
 # 1.4.0-11
 
 * Allow the web service's narrow `ReadWritePaths` exception to cover persistent data stored below `/home`, while keeping the rest of the filesystem read-only through `ProtectSystem=strict`.
