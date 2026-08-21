@@ -1,3 +1,7 @@
+# 1.4.0-13
+
+* Emit literal nginx variables in the managed reverse-proxy hook instead of malformed PHP-interpolated values that break Plesk vhost generation.
+
 # 1.4.0-12
 
 * Create every managed persistent-data path component with the service account ownership and repair root-owned `0750` parent directories left by older deployments.
